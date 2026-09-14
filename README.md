@@ -67,7 +67,9 @@ and skip when it is unset.
 | Local services (Postgres + Redis) | done |
 | `@brainpal/contracts` | done |
 | `@brainpal/database` | done |
-| `apps/api` | next |
+| `@brainpal/auth` | done (mock verifier; Cognito pending) |
+| `apps/api` — health, me, family, pals, threads | done |
+| `apps/api` — `POST /v1/agent/turn` | next |
 | `packages/brainpal` orchestrator | next |
 | `apps/web` | next |
 | Avatar system | next |

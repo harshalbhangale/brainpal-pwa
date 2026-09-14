@@ -1,5 +1,20 @@
 {
   "$schema": "https://turborepo.com/schema.json",
+  "globalEnv": [
+    "NODE_ENV",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "MOCK_AUTH",
+    "API_PORT",
+    "LOG_LEVEL",
+    "ALLOWED_ORIGINS",
+    "RATE_LIMIT_MAX",
+    "OPENAI_API_KEY",
+    "MODEL_ROUTER",
+    "MODEL_BALANCED",
+    "MODEL_REASONING",
+    "MODEL_VISION"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -9,8 +24,7 @@
       "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": ["^build"],
-      "env": ["DATABASE_URL"]
+      "dependsOn": ["^build"]
     },
     "dev": {
       "cache": false,
