@@ -19,7 +19,11 @@ import { registerThreadRoutes } from "./routes/threads.js";
 export const SERVICE_NAME = "brainpal-api";
 export const SERVICE_VERSION = "0.1.0";
 
-function allowedOrigins(): string[] {
+/**
+ * Exported because the streaming turn writes to `reply.raw` and so must apply
+ * these itself: raw writes bypass the reply lifecycle @fastify/cors hooks into.
+ */
+export function allowedOrigins(): string[] {
   const configured = process.env["ALLOWED_ORIGINS"];
   if (configured) return configured.split(",").map((o) => o.trim());
   if (process.env["NODE_ENV"] === "production") return [];

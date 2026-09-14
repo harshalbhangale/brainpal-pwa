@@ -6,6 +6,7 @@ import {
 } from "@brainpal/contracts";
 
 import { agentFor } from "./agents.js";
+import { type ModelRole, modelNameFor } from "./models.js";
 import { applyActivation, routeRequest } from "./router.js";
 
 export interface TurnInput {
@@ -23,6 +24,9 @@ export type TurnEvent =
   | { type: "error"; code: string; message: string };
 
 export interface TurnUsage {
+  /** The role the model was addressed by. */
+  modelRole: ModelRole;
+  /** The model that actually ran — the id, never the agent's name. */
   model: string;
   inputTokens: number | undefined;
   outputTokens: number | undefined;
@@ -68,9 +72,12 @@ export async function* runTurn(
     input.speakerRole === "child" ? "child" : "parent"
   } in this family.`;
 
+  const PAL_ROLE: ModelRole = "balanced";
+
   let text = "";
   let usage: TurnUsage = {
-    model: "unknown",
+    modelRole: PAL_ROLE,
+    model: modelNameFor(PAL_ROLE),
     inputTokens: undefined,
     outputTokens: undefined,
     latencyMs: 0,
@@ -89,7 +96,8 @@ export async function* runTurn(
 
     const counts = await stream.usage;
     usage = {
-      model: agent.name,
+      modelRole: PAL_ROLE,
+      model: modelNameFor(PAL_ROLE),
       inputTokens: counts?.inputTokens,
       outputTokens: counts?.outputTokens,
       latencyMs: Date.now() - startedAt,

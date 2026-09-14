@@ -101,4 +101,54 @@ describe("agent turn", { skip: !hasDatabase }, () => {
       .where(eq(agentRuns.familyId, familyId));
     assert.equal(runs.length, 0, "runs are only created once a turn starts");
   });
+
+  // Needs a real model: the headers are written only once the stream opens.
+  const liveModel =
+    Boolean(process.env["OPENAI_API_KEY"]) &&
+    Boolean(process.env["MODEL_ROUTER"]) &&
+    Boolean(process.env["MODEL_BALANCED"]);
+
+  test(
+    "the streaming turn carries its own CORS headers",
+    { skip: !liveModel },
+    async () => {
+      // Writing to reply.raw bypasses the reply lifecycle @fastify/cors hooks
+      // into. Without these set by hand the browser rejects the whole stream,
+      // while curl — which ignores CORS — looks perfectly healthy.
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/agent/turn",
+        payload: { text: "hello" },
+        headers: {
+          authorization: `Bearer ${parentToken}`,
+          origin: "http://localhost:3000",
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers["content-type"], "text/event-stream");
+      assert.equal(
+        res.headers["access-control-allow-origin"],
+        "http://localhost:3000",
+      );
+    },
+  );
+
+  test(
+    "an origin outside the allowlist gets no CORS grant",
+    { skip: !liveModel },
+    async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/agent/turn",
+        payload: { text: "hello" },
+        headers: {
+          authorization: `Bearer ${parentToken}`,
+          origin: "https://not-brainpal.example",
+        },
+      });
+
+      assert.equal(res.headers["access-control-allow-origin"], undefined);
+    },
+  );
 });

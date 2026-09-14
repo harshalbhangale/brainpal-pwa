@@ -14,6 +14,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 
+import { allowedOrigins } from "../app.js";
 import { ApiError } from "../errors.js";
 
 async function activePalsFor(familyId: string): Promise<Set<string>> {
@@ -99,6 +100,18 @@ export async function registerAgentRoutes(app: FastifyInstance) {
     reply.raw.setHeader("cache-control", "no-cache");
     reply.raw.setHeader("connection", "keep-alive");
     reply.raw.setHeader("x-request-id", String(request.id));
+
+    // Writing to reply.raw skips the reply lifecycle that @fastify/cors hooks
+    // into, so without this the browser rejects the whole stream for a missing
+    // Access-Control-Allow-Origin — while curl, which ignores CORS, works fine.
+    // The origin is still checked against the same allowlist.
+    const origin = request.headers.origin;
+    if (origin && allowedOrigins().includes(origin)) {
+      reply.raw.setHeader("access-control-allow-origin", origin);
+      reply.raw.setHeader("access-control-allow-credentials", "true");
+      reply.raw.setHeader("vary", "origin");
+    }
+
     reply.raw.flushHeaders();
 
     const send = (event: TurnEvent, thread?: string) => {
@@ -160,7 +173,7 @@ export async function registerAgentRoutes(app: FastifyInstance) {
             .set({
               status: "succeeded",
               responseType: event.result.responseType,
-              modelRole: "balanced",
+              modelRole: event.usage.modelRole,
               model: event.usage.model,
               inputTokens: event.usage.inputTokens ?? null,
               outputTokens: event.usage.outputTokens ?? null,

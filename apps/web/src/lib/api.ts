@@ -164,14 +164,27 @@ export async function* streamTurn(
   threadId?: string,
 ): AsyncGenerator<TurnEvent> {
   const token = getToken();
-  const response = await fetch(`${BASE}/v1/agent/turn`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(threadId ? { text, threadId } : { text }),
-  });
+
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}/v1/agent/turn`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(threadId ? { text, threadId } : { text }),
+    });
+  } catch {
+    // Offline, blocked or refused. Unguarded, this rejection propagates out of
+    // the generator and leaves the composer spinning with no message at all.
+    yield {
+      type: "error",
+      code: "OFFLINE",
+      message: "Cannot reach BrainPal right now.",
+    };
+    return;
+  }
 
   if (!response.ok || !response.body) {
     const body = (await response.json().catch(() => null)) as
