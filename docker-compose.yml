@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: brainpal
+      POSTGRES_PASSWORD: brainpal
+      POSTGRES_DB: brainpal
+    ports:
+      # 5433 on the host: a native Postgres commonly owns 5432, and on macOS it
+      # wins the localhost race because ::1 resolves first. Loopback-bound so the
+      # dev database is never reachable off this machine.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - brainpal-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brainpal -d brainpal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - brainpal-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  brainpal-postgres:
+  brainpal-redis:
