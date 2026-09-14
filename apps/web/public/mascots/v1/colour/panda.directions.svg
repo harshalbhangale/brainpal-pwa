@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="384" height="384" viewBox="0 0 384 384">
+<title>panda placeholder sprite sheet</title>
+<g transform="translate(0 0)"><circle cx="34" cy="34" r="16" fill="#5A5A66"/>
+            <circle cx="94" cy="34" r="16" fill="#5A5A66"/>
+    <circle cx="64" cy="70" r="40" fill="#5A5A66"/>
+    <ellipse cx="64" cy="82" rx="26" ry="22" fill="#F0F0F3"/><circle cx="49.5" cy="64" r="8.5" fill="#fff"/>
+          <circle cx="73.5" cy="64" r="8.5" fill="#fff"/>
+          <circle cx="43" cy="59" r="4.6" fill="#2A2A30"/>
+          <circle cx="67" cy="59" r="4.6" fill="#2A2A30"/><path d="M54 90 Q62 95 70 90" stroke="#2A2A30" stroke-width="3"
+    stroke-linecap="round" fill="none"/></g>
+<g transform="translate(128 0)"><circle cx="34" cy="34" r="16" fill="#5A5A66"/>
+            <circle cx="94" cy="34" r="16" fill="#5A5A66"/>
+    <circle cx="64" cy="70" r="40" fill="#5A5A66"/>
+    <ellipse cx="64" cy="82" rx="26" ry="22" fill="#F0F0F3"/><circle cx="52" cy="64" r="8.5" fill="#fff"/>
+          <circle cx="76" cy="64" r="8.5" fill="#fff"/>
+          <circle cx="52" cy="59" r="4.6" fill="#2A2A30"/>
+          <circle cx="76" cy="59" r="4.6" fill="#2A2A30"/><path d="M56 90 Q64 95 72 90" stroke="#2A2A30" stroke-width="3"
+    stroke-linecap="round" fill="none"/></g>
+<g transform="translate(256 0)"><circle cx="34" cy="34" r="16" fill="#5A5A66"/>
+            <circle cx="94" cy="34" r="16" fill="#5A5A66"/>
+    <circle cx="64" cy="70" r="40" fill="#5A5A66"/>
+    <ellipse cx="64" cy="82" rx="26" ry="22" fill="#F0F0F3"/><circle cx="54.5" cy="64" r="8.5" fill="#fff"/>
+          <circle cx="78.5" cy="64" r="8.5" fill="#fff"/>
+          <circle cx="61" cy="59" r="4.6" fill="#2A2A30"/>
+          <circle cx="85" cy="59" r="4.6" fill="#2A2A30"/><path d="M58 90 Q66 95 74 90" stroke="#2A2A30" stroke-width="3"
+    stroke-linecap="round" fill="none"/></g>
+<g transform="translate(0 128)"><circle cx="34" cy="34" r="16" fill="#5A5A66"/>
+            <circle cx="94" cy="34" r="16" fill="#5A5A66"/>
+    <circle cx="64" cy="70" r="40" fill="#5A5A66"/>
+    <ellipse cx="64" cy="82" rx="26" ry="22" fill="#F0F0F3"/><circle cx="49.5" cy="66" r="8.5" fill="#fff"/>
+          <circle cx="73.5" cy="66" r="8.5" fill="#fff"/>
+          <circle cx="43" cy="66" r="4.6" fill="#2A2A30"/>
+          <circle cx="67" cy="66" r="4.6" fill="#2A2A30"/><path d="M54 90 Q62 95 70 90" stroke="#2A2A30" stroke-width="3"
+    stroke-linecap="round" fill="none"/></g>
+<g transform="translate(128 128)"><circle cx="34" cy="34" r="16" fill="#5A5A66"/>
+            <circle cx="94" cy="34" r="16" fill="#5A5A66"/>
+    <circle cx="64" cy="70" r="40" fill="#5A5A66"/>
+    <ellipse cx="64" cy="82" rx="26" ry="22" fill="#F0F0F3"/><circle cx="52" cy="66" r="8.5" fill="#fff"/>
+          <circle cx="76" cy="66" r="8.5" fill="#fff"/>
+          <circle cx="52" cy="66" r="4.6" fill="#2A2A30"/>
+          <circle cx="76" cy="66" r="4.6" fill="#2A2A30"/><path d="M56 90 Q64 95 72 90" stroke="#2A2A30" stroke-width="3"
+    stroke-linecap="round" fill="none"/></g>
+<g transform="translate(256 128)"><circle cx="34" cy="34" r="16" fill="#5A5A66"/>
+            <circle cx="94" cy="34" r="16" fill="#5A5A66"/>
+    <circle cx="64" cy="70" r="40" fill="#5A5A66"/>
+    <ellipse cx="64" cy="82" rx="26" ry="22" fill="#F0F0F3"/><circle cx="54.5" cy="66" r="8.5" fill="#fff"/>
+          <circle cx="78.5" cy="66" r="8.5" fill="#fff"/>
+          <circle cx="61" cy="66" r="4.6" fill="#2A2A30"/>
+          <circle cx="85" cy="66" r="4.6" fill="#2A2A30"/><path d="M58 90 Q66 95 74 90" stroke="#2A2A30" stroke-width="3"
+    stroke-linecap="round" fill="none"/></g>
+<g transform="translate(0 256)"><circle cx="34" cy="34" r="16" fill="#5A5A66"/>
+            <circle cx="94" cy="34" r="16" fill="#5A5A66"/>
+    <circle cx="64" cy="70" r="40" fill="#5A5A66"/>
+    <ellipse cx="64" cy="82" rx="26" ry="22" fill="#F0F0F3"/><circle cx="49.5" cy="68" r="8.5" fill="#fff"/>
+          <circle cx="73.5" cy="68" r="8.5" fill="#fff"/>
+          <circle cx="43" cy="73" r="4.6" fill="#2A2A30"/>
+          <circle cx="67" cy="73" r="4.6" fill="#2A2A30"/><path d="M54 90 Q62 95 70 90" stroke="#2A2A30" stroke-width="3"
+    stroke-linecap="round" fill="none"/></g>
+<g transform="translate(128 256)"><circle cx="34" cy="34" r="16" fill="#5A5A66"/>
+            <circle cx="94" cy="34" r="16" fill="#5A5A66"/>
+    <circle cx="64" cy="70" r="40" fill="#5A5A66"/>
+    <ellipse cx="64" cy="82" rx="26" ry="22" fill="#F0F0F3"/><circle cx="52" cy="68" r="8.5" fill="#fff"/>
+          <circle cx="76" cy="68" r="8.5" fill="#fff"/>
+          <circle cx="52" cy="73" r="4.6" fill="#2A2A30"/>
+          <circle cx="76" cy="73" r="4.6" fill="#2A2A30"/><path d="M56 90 Q64 95 72 90" stroke="#2A2A30" stroke-width="3"
+    stroke-linecap="round" fill="none"/></g>
+<g transform="translate(256 256)"><circle cx="34" cy="34" r="16" fill="#5A5A66"/>
+            <circle cx="94" cy="34" r="16" fill="#5A5A66"/>
+    <circle cx="64" cy="70" r="40" fill="#5A5A66"/>
+    <ellipse cx="64" cy="82" rx="26" ry="22" fill="#F0F0F3"/><circle cx="54.5" cy="68" r="8.5" fill="#fff"/>
+          <circle cx="78.5" cy="68" r="8.5" fill="#fff"/>
+          <circle cx="61" cy="73" r="4.6" fill="#2A2A30"/>
+          <circle cx="85" cy="73" r="4.6" fill="#2A2A30"/><path d="M58 90 Q66 95 74 90" stroke="#2A2A30" stroke-width="3"
+    stroke-linecap="round" fill="none"/></g>
+</svg>
