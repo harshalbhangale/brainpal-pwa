@@ -17,6 +17,42 @@ export interface Principal {
   displayName: string;
 }
 
+/**
+ * Identity without authorisation. A verified subject always has a user row, but
+ * may not belong to a family yet — that is the state a parent is in between
+ * signing in and creating one, and a child is in before redeeming a join code.
+ *
+ * Nothing but the bootstrap routes may use this: it proves who someone is and
+ * says nothing about what they may see.
+ */
+export async function ensureUser(
+  db: Database,
+  authSubject: string,
+): Promise<string> {
+  const [existing] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.authSubject, authSubject))
+    .limit(1);
+  if (existing) return existing.id;
+
+  const [created] = await db
+    .insert(users)
+    .values({ authSubject })
+    .onConflictDoNothing()
+    .returning({ id: users.id });
+  if (created) return created.id;
+
+  // Lost an insert race; the row now exists.
+  const [raced] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.authSubject, authSubject))
+    .limit(1);
+  if (!raced) throw new AuthError("NO_USER", "could not create user");
+  return raced.id;
+}
+
 export async function resolvePrincipal(
   db: Database,
   authSubject: string,

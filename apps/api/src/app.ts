@@ -4,11 +4,15 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 
-import { authenticate, buildVerifier } from "./auth.js";
+import { authenticate, buildVerifier, identify } from "./auth.js";
 import { ApiError, type ErrorEnvelope } from "./errors.js";
 import { registerAgentRoutes } from "./routes/agent.js";
 import { registerFamilyRoutes } from "./routes/families.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import {
+  registerBootstrapRoutes,
+  registerFamilyWriteRoutes,
+} from "./routes/onboarding.js";
 import { registerPalRoutes } from "./routes/pals.js";
 import { registerThreadRoutes } from "./routes/threads.js";
 
@@ -93,10 +97,20 @@ export async function buildApp(): Promise<FastifyInstance> {
   // and no database.
   await app.register(registerHealthRoutes);
 
+  const verifier = buildVerifier();
+
+  // Identity but no membership: the two routes that must run before a
+  // membership can exist. Each establishes its own authorisation.
+  await app.register(async (bootstrapScope) => {
+    bootstrapScope.addHook("preHandler", identify(verifier));
+    await bootstrapScope.register(registerBootstrapRoutes);
+  });
+
   await app.register(async (protectedScope) => {
-    protectedScope.addHook("preHandler", authenticate(buildVerifier()));
+    protectedScope.addHook("preHandler", authenticate(verifier));
     await protectedScope.register(registerAgentRoutes);
     await protectedScope.register(registerFamilyRoutes);
+    await protectedScope.register(registerFamilyWriteRoutes);
     await protectedScope.register(registerPalRoutes);
     await protectedScope.register(registerThreadRoutes);
   });
