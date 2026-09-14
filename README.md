@@ -69,10 +69,14 @@ and skip when it is unset.
 | `@brainpal/database` | done |
 | `@brainpal/auth` | done (mock verifier; Cognito pending) |
 | `apps/api` — health, me, family, pals, threads | done |
-| `apps/api` — `POST /v1/agent/turn` | next |
-| `packages/brainpal` orchestrator | next |
+| `packages/brainpal` — registry, router, agents, orchestrator | done |
+| `apps/api` — `POST /v1/agent/turn` (SSE) | done |
 | `apps/web` | next |
 | Avatar system | next |
+
+The agent turn needs `OPENAI_API_KEY` and all four `MODEL_*` roles in
+`.env.local`. Without them the route answers `503 AI_UNAVAILABLE` rather than
+failing — every other route keeps working.
 
 Phase 1 is complete when a parent can log in, create a family, add a child, the
 child can pick an avatar, and a question routes to the right PAL and streams an

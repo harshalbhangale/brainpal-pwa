@@ -6,6 +6,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 
 import { authenticate, buildVerifier } from "./auth.js";
 import { ApiError, type ErrorEnvelope } from "./errors.js";
+import { registerAgentRoutes } from "./routes/agent.js";
 import { registerFamilyRoutes } from "./routes/families.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerPalRoutes } from "./routes/pals.js";
@@ -94,6 +95,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(async (protectedScope) => {
     protectedScope.addHook("preHandler", authenticate(buildVerifier()));
+    await protectedScope.register(registerAgentRoutes);
     await protectedScope.register(registerFamilyRoutes);
     await protectedScope.register(registerPalRoutes);
     await protectedScope.register(registerThreadRoutes);

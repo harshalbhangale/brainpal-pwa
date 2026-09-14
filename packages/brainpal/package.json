@@ -1,0 +1,31 @@
+{
+  "name": "@brainpal/brainpal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc && node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.66",
+    "@brainpal/contracts": "workspace:*",
+    "@mastra/core": "^1.66.0",
+    "ai": "^7.0.100",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2"
+  }
+}
