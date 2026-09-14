@@ -67,7 +67,7 @@ export async function registerBootstrapRoutes(app: FastifyInstance) {
         familyId: family!.id,
         userId,
         role: "parent",
-        displayName: parsed.data.familyName,
+        displayName: parsed.data.parentName,
         status: "active",
       })
       .returning();

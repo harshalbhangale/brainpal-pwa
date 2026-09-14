@@ -29,9 +29,13 @@ describe("onboarding", { skip: !hasDatabase }, () => {
   const get = (url: string, token: string) =>
     app.inject({ method: "GET", url, headers: { authorization: `Bearer ${token}` } });
 
-  async function newParent(name = "Bhangale") {
+  async function newParent(name = "Bhangale", parentName = "Parent") {
     const token = newToken();
-    const res = await post("/v1/onboarding/family", { familyName: name, currency: "AUD" }, token);
+    const res = await post(
+      "/v1/onboarding/family",
+      { familyName: name, parentName, currency: "AUD" },
+      token,
+    );
     assert.equal(res.statusCode, 200);
     createdFamilies.push(res.json().familyId);
     return { token, ...res.json() };
@@ -58,11 +62,26 @@ describe("onboarding", { skip: !hasDatabase }, () => {
     assert.equal(me.familyId, parent.familyId);
   });
 
+  test("the parent is named after themselves, not their family", async () => {
+    const parent = await newParent("Bhangale", "Harshal");
+    const me = (await get("/v1/me", parent.token)).json();
+    assert.equal(me.displayName, "Harshal");
+  });
+
+  test("a family cannot be created without naming the parent", async () => {
+    const res = await post(
+      "/v1/onboarding/family",
+      { familyName: "Nameless", currency: "AUD" },
+      newToken(),
+    );
+    assert.equal(res.statusCode, 400);
+  });
+
   test("a user cannot create a second family", async () => {
     const parent = await newParent();
     const res = await post(
       "/v1/onboarding/family",
-      { familyName: "Another", currency: "AUD" },
+      { familyName: "Another", parentName: "Parent", currency: "AUD" },
       parent.token,
     );
     assert.equal(res.statusCode, 409);
@@ -74,7 +93,7 @@ describe("onboarding", { skip: !hasDatabase }, () => {
     const res = await app.inject({
       method: "POST",
       url: "/v1/onboarding/family",
-      payload: { familyName: "Nope", currency: "AUD" },
+      payload: { familyName: "Nope", parentName: "Nobody", currency: "AUD" },
     });
     assert.equal(res.statusCode, 401);
   });

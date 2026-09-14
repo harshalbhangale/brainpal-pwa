@@ -15,6 +15,8 @@ export const FamilyCreate = z.object({
   command: z.literal("family.create"),
   payload: z.object({
     familyName: z.string().min(1).max(80),
+    /** The creating parent's own name — not the family's. */
+    parentName: z.string().min(1).max(40),
     currency: z.literal("AUD"),
   }),
 });

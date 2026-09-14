@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ground: #EBECE7;
+  --color-card: #FFFFFF;
+  --color-ink: #2A2A30;
+  --color-muted: #6B6B75;
+  --color-line: #DDDDD6;
+  --color-accent: #E2703A;
+  --color-money: #4E8FA8;
+  --color-tutor: #5B9A54;
+}
+
+html, body { background: var(--color-ground); color: var(--color-ink); }
+
+/* Touch targets stay comfortable for a child's hands. */
+button, a[role="button"] { min-height: 44px; }
+
+@keyframes brainpal-mascot-think {
+  0%, 100% { transform: translateY(0) }
+  50%      { transform: translateY(-6%) }
+}
+@keyframes brainpal-mascot-speak {
+  0%, 100% { transform: scale(1, 1) }
+  50%      { transform: scale(1.04, 0.97) }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes brainpal-mascot-think { 0%, 100% { transform: none } }
+  @keyframes brainpal-mascot-speak { 0%, 100% { transform: none } }
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
