@@ -17,6 +17,9 @@ apps/web/public/swe-worker-*.js
 .env.local
 .env.*.local
 
+# Local uploads when no S3 bucket is configured.
+.data/
+
 coverage/
 .nyc_output/
 

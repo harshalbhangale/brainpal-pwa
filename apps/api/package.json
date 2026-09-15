@@ -17,6 +17,7 @@
     "@brainpal/contracts": "workspace:*",
     "@brainpal/database": "workspace:*",
     "@brainpal/moneypal": "workspace:*",
+    "@brainpal/tutorpal": "workspace:*",
     "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^11.2.0",

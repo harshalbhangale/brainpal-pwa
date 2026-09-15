@@ -11,6 +11,7 @@ import { registerAgentRoutes } from "./routes/agent.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerFamilyRoutes } from "./routes/families.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import { registerLearningRoutes } from "./routes/learning.js";
 import { registerMoneyRoutes } from "./routes/money.js";
 import {
   registerBootstrapRoutes,
@@ -91,6 +92,20 @@ export async function buildApp(): Promise<FastifyInstance> {
       } satisfies ErrorEnvelope);
     }
 
+    // Fastify's own client errors — malformed JSON, a body too large, an
+    // unsupported content type — are the caller's fault, not a 500.
+    if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) {
+      const code = (error as { code?: string }).code ?? "BAD_REQUEST";
+      request.log.warn({ code, requestId }, error instanceof Error ? error.message : "client error");
+      return reply.status(statusCode).send({
+        error: {
+          code,
+          message: error instanceof Error ? error.message : "bad request",
+          requestId,
+        },
+      } satisfies ErrorEnvelope);
+    }
+
     request.log.error({ err: error, requestId }, "unhandled error");
     return reply.status(500).send({
       error: {
@@ -125,6 +140,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await protectedScope.register(registerFamilyRoutes);
     await protectedScope.register(registerFamilyWriteRoutes);
     await protectedScope.register(registerMoneyRoutes);
+    await protectedScope.register(registerLearningRoutes);
     await protectedScope.register(registerPalRoutes);
     await protectedScope.register(registerThreadRoutes);
   });

@@ -50,6 +50,13 @@
       "when": 1789470538022,
       "tag": "0006_reversals_and_family_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789478979522,
+      "tag": "0007_tutorpal_core",
+      "breakpoints": true
     }
   ]
 }
