@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -222,12 +223,20 @@ export const ledgerTransactions = pgTable(
       { onDelete: "set null" },
     ),
     metadata: jsonb("metadata"),
+    /** Set on a reversal: the transaction it undoes. Unique, so nothing is reversed twice. */
+    reversesTransactionId: uuid("reverses_transaction_id").references(
+      (): AnyPgColumn => ledgerTransactions.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (table) => [
     uniqueIndex("ledger_transactions_idempotency_key").on(table.idempotencyKey),
+    uniqueIndex("ledger_transactions_reverses_key")
+      .on(table.reversesTransactionId)
+      .where(sql`${table.reversesTransactionId} is not null`),
     index("ledger_transactions_family_created_idx").on(
       table.familyId,
       table.createdAt,

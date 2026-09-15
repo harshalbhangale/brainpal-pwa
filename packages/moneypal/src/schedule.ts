@@ -45,6 +45,12 @@ function zonedInstant(year: number, month: number, day: number, hour: number, ti
   return new Date(guess - offsetAt(first, timeZone));
 }
 
+/** Midnight at the start of `date`'s local day in `timeZone`. */
+export function startOfLocalDay(date: Date, timeZone: string): Date {
+  const p = localParts(date, timeZone);
+  return zonedInstant(p.year, p.month, p.day, 0, timeZone);
+}
+
 export function localDateKey(date: Date, timeZone: string): string {
   const p = localParts(date, timeZone);
   return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;

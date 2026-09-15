@@ -16,6 +16,7 @@ import {
   type Goal,
   type History,
   type Me,
+  type Pal,
   type SpendRequestRow,
   type Wallet,
 } from "@/lib/api";
@@ -55,6 +56,7 @@ export default function Money() {
   const [cards, setCards] = useState<CardState[]>([]);
   const [requests, setRequests] = useState<SpendRequestRow[]>([]);
   const [history, setHistory] = useState<History | null>(null);
+  const [moneyPalOn, setMoneyPalOn] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +92,10 @@ export default function Money() {
     setCards(k.cards);
     setRequests(r.requests);
     setHistory(h);
+    api
+      .get<{ pals: Pal[] }>("/v1/pals")
+      .then((p) => setMoneyPalOn(p.pals.find((pal) => pal.id === "moneypal")?.active ?? false))
+      .catch(() => undefined);
     setTarget((current) => current || (who.role === "child" ? who.memberId : (w.children[0]?.memberId ?? "")));
     if (who.role !== "child") {
       setApprovals((await api.get<{ approvals: Approval[] }>("/v1/money/approvals")).approvals);
@@ -142,6 +148,25 @@ export default function Money() {
         <p role="alert" className="rounded-xl bg-card px-4 py-3 text-sm text-accent">
           {error}
         </p>
+      ) : null}
+
+      {!moneyPalOn ? (
+        <section className="flex items-center justify-between gap-3 rounded-2xl bg-card p-4 shadow-sm">
+          <p className="text-sm">
+            MoneyPAL is off, so it cannot answer money questions.
+            {parent ? "" : " Ask a parent to turn it on."}
+          </p>
+          {parent ? (
+            <button
+              type="button"
+              disabled={busy}
+              className={primary}
+              onClick={() => void act(() => api.post("/v1/pals/moneypal/activate"), "MoneyPAL is on.")}
+            >
+              Turn on
+            </button>
+          ) : null}
+        </section>
       ) : null}
 
       {wallet ? (
@@ -654,17 +679,22 @@ export default function Money() {
         ))}
         {history && history.items.length === 0 ? <p className="text-sm text-muted">Nothing yet.</p> : null}
         {history?.items.map((item) => (
-          <div key={item.transactionId} className={`flex justify-between gap-3 ${row}`}>
+          <Link
+            key={item.transactionId}
+            href={`/money/receipt/${item.transactionId}`}
+            className={`flex justify-between gap-3 ${row}`}
+          >
             <div className="min-w-0">
-              <p className="truncate font-medium">{item.title}</p>
+              <p className={`truncate font-medium ${item.status === "reversed" ? "line-through" : ""}`}>{item.title}</p>
               <p className="text-xs text-muted">
                 {new Date(item.createdAt).toLocaleDateString("en-AU")} · {item.lines.map((l) => l.account).join(" → ")}
+                {item.status === "reversed" ? " · reversed" : ""}
               </p>
             </div>
             <span className={`shrink-0 font-medium ${item.netMinor < 0 ? "text-accent" : "text-money"}`}>
               {item.netMinor === 0 ? aud(item.amountMinor) : `${item.netMinor < 0 ? "−" : "+"}${aud(item.netMinor)}`}
             </span>
-          </div>
+          </Link>
         ))}
       </section>
     </main>

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { MoneyError, localDateKey, nextAllowanceAt, weeklyPathMinor } from "../dist/index.js";
+import { MoneyError, localDateKey, nextAllowanceAt, startOfLocalDay, weeklyPathMinor } from "../dist/index.js";
+
+test("a family's day starts at its own midnight, not UTC's", () => {
+  // Friday 8am in Sydney is still Thursday in UTC.
+  const start = startOfLocalDay(new Date("2026-09-17T22:00:00Z"), "Australia/Sydney");
+  assert.equal(start.toISOString(), "2026-09-17T14:00:00.000Z");
+});
 
 const SYDNEY = "Australia/Sydney";
 const FRIDAY = 5;

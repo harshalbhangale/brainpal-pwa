@@ -25,6 +25,7 @@ export interface PostInput {
   commandId?: string;
   actorMemberId?: string | null;
   metadata?: Record<string, unknown>;
+  reversesTransactionId?: string;
 }
 
 export interface PostResult {
@@ -130,6 +131,7 @@ export async function postTransaction(tx: Tx, input: PostInput): Promise<PostRes
       commandId: input.commandId ?? null,
       createdByMemberId: input.actorMemberId ?? null,
       metadata: input.metadata ?? null,
+      reversesTransactionId: input.reversesTransactionId ?? null,
     })
     .onConflictDoNothing({ target: ledgerTransactions.idempotencyKey })
     .returning({ id: ledgerTransactions.id });

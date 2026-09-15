@@ -8,6 +8,7 @@ import {
   auditEvents,
   cardControls,
   chores,
+  families,
   familyMembers,
   ledgerEntries,
   ledgerTransactions,
@@ -24,7 +25,13 @@ import { type CardChange, cardProvider } from "./cards.js";
 import { MoneyError } from "./errors.js";
 import { balanceMinor, postTransaction, type Tx } from "./ledger.js";
 import { type Role, isParentRole, policyFor } from "./policy.js";
-import { assertTimeZone, localDateKey, nextAllowanceAt, weeklyPathMinor } from "./schedule.js";
+import {
+  assertTimeZone,
+  localDateKey,
+  nextAllowanceAt,
+  startOfLocalDay,
+  weeklyPathMinor,
+} from "./schedule.js";
 
 export interface Actor {
   memberId: string;
@@ -469,6 +476,60 @@ async function execute(
       return { scheduleId: schedule.id, status: paused ? "paused" : "active", nextRunAt: nextRunAt.toISOString() };
     }
 
+    case "money.reverse": {
+      const { transactionId, reason } = proposal.payload;
+      const [original] = await tx
+        .select()
+        .from(ledgerTransactions)
+        .where(and(eq(ledgerTransactions.id, transactionId), eq(ledgerTransactions.familyId, familyId)))
+        .limit(1)
+        .for("update");
+      if (!original) throw new MoneyError("TRANSACTION_NOT_FOUND", "that transaction was not found");
+      if (original.reversesTransactionId) {
+        throw new MoneyError("REVERSAL_NOT_ALLOWED", "A reversal cannot itself be reversed.");
+      }
+      const [already] = await tx
+        .select({ id: ledgerTransactions.id })
+        .from(ledgerTransactions)
+        .where(eq(ledgerTransactions.reversesTransactionId, original.id))
+        .limit(1);
+      if (already) throw new MoneyError("ALREADY_REVERSED", "That transaction has already been reversed.");
+
+      const entries = await tx.select().from(ledgerEntries).where(eq(ledgerEntries.transactionId, original.id));
+      const title = (original.metadata as { title?: unknown } | null)?.title;
+      try {
+        const posted = await postTransaction(tx, {
+          familyId,
+          kind: "reversal",
+          idempotencyKey: `reversal:${original.id}`,
+          commandId,
+          actorMemberId: actor.memberId,
+          reversesTransactionId: original.id,
+          // The mirror image of the original: every debit becomes a credit and vice versa.
+          postings: entries.map((e) => ({
+            accountId: e.accountId,
+            direction: e.direction === "debit" ? ("credit" as const) : ("debit" as const),
+            amountMinor: e.amountMinor,
+          })),
+          metadata: {
+            title: `Reversed: ${typeof title === "string" ? title : original.kind}`,
+            reason,
+            reversesTransactionId: original.id,
+          },
+        });
+        return { transactionId: posted.transactionId, reversesTransactionId: original.id };
+      } catch (error) {
+        if (error instanceof MoneyError && error.code === "INSUFFICIENT_FUNDS") {
+          throw new MoneyError(
+            "REVERSAL_INSUFFICIENT_FUNDS",
+            "Some of that money has already been spent, so it cannot be taken back in full.",
+            error.details,
+          );
+        }
+        throw error;
+      }
+    }
+
     case "card.freeze":
       assertSelf(actor, proposal.payload.childMemberId);
       return applyCard(tx, actor, { memberId: proposal.payload.childMemberId, frozen: proposal.payload.frozen });
@@ -723,9 +784,8 @@ async function payChore(tx: Tx, actor: Actor, commandId: string, choreId: string
   return { choreId: chore.id, amountMinor: chore.rewardMinor, destination: chore.destination, transactionId };
 }
 
-async function spentTodayMinor(tx: Tx, spendAccountId: string): Promise<number> {
-  const startOfDay = new Date();
-  startOfDay.setUTCHours(0, 0, 0, 0);
+async function spentTodayMinor(tx: Tx, spendAccountId: string, timeZone: string): Promise<number> {
+  const startOfDay = startOfLocalDay(new Date(), timeZone);
   const [row] = await tx
     .select({ minor: sql<string>`coalesce(sum(${ledgerEntries.amountMinor}), 0)` })
     .from(ledgerEntries)
@@ -765,7 +825,12 @@ async function paySpend(tx: Tx, actor: Actor, commandId: string, requestId: stri
   const spend = await accountId(tx, actor.familyId, "spend", request.requesterMemberId);
   const outside = await accountId(tx, actor.familyId, "external_funding");
 
-  const spent = await spentTodayMinor(tx, spend);
+  const [family] = await tx
+    .select({ timeZone: families.timeZone })
+    .from(families)
+    .where(eq(families.id, actor.familyId))
+    .limit(1);
+  const spent = await spentTodayMinor(tx, spend, family?.timeZone ?? "Australia/Sydney");
   if (spent + request.amountMinor > card.dailyLimitMinor) {
     throw new MoneyError(
       "DAILY_LIMIT_EXCEEDED",

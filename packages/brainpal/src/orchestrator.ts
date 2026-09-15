@@ -51,8 +51,11 @@ export async function* runTurn(
   const startedAt = Date.now();
 
   let routing;
+  let switchedOffPal: OwningPalId | null = null;
   try {
-    routing = applyActivation(await routeRequest(input.text), input.activePals);
+    const chosen = await routeRequest(input.text);
+    routing = applyActivation(chosen, input.activePals);
+    if (routing.ownerPal !== chosen.ownerPal) switchedOffPal = chosen.ownerPal;
   } catch (error) {
     yield {
       type: "error",
@@ -88,6 +91,19 @@ export async function* runTurn(
   try {
     const stream = await agent.stream([
       { role: "system", content: context },
+      ...(switchedOffPal
+        ? [
+            {
+              role: "system" as const,
+              content:
+                `This request belongs to ${switchedOffPal === "moneypal" ? "MoneyPAL" : "TutorPAL"}, ` +
+                `but this family has not turned it on, so you cannot see or do what it would. Say that plainly first. ` +
+                (input.speakerRole === "child"
+                  ? "Suggest they ask a parent to turn it on."
+                  : "Tell them they can turn it on from the Money screen."),
+            },
+          ]
+        : []),
       ...(routing.ownerPal === "moneypal" && input.moneyFacts
         ? [
             {

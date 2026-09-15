@@ -1,0 +1,4 @@
+ALTER TABLE "families" ADD COLUMN "time_zone" text DEFAULT 'Australia/Sydney' NOT NULL;--> statement-breakpoint
+ALTER TABLE "ledger_transactions" ADD COLUMN "reverses_transaction_id" uuid;--> statement-breakpoint
+ALTER TABLE "ledger_transactions" ADD CONSTRAINT "ledger_transactions_reverses_transaction_id_ledger_transactions_id_fk" FOREIGN KEY ("reverses_transaction_id") REFERENCES "public"."ledger_transactions"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "ledger_transactions_reverses_key" ON "ledger_transactions" USING btree ("reverses_transaction_id") WHERE "ledger_transactions"."reverses_transaction_id" is not null;

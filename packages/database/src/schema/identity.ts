@@ -38,6 +38,8 @@ export const families = pgTable("families", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   currency: text("currency").notNull().default("AUD"),
+  /** The family's own day boundaries: daily card limits reset at its midnight, not UTC's. */
+  timeZone: text("time_zone").notNull().default("Australia/Sydney"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

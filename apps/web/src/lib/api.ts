@@ -228,9 +228,17 @@ export interface HistoryItem {
   kind: string;
   title: string;
   createdAt: string;
+  status: "settled" | "reversed";
   amountMinor: number;
   netMinor: number;
   lines: Array<{ account: string; direction: "debit" | "credit"; amountMinor: number }>;
+  reversedByTransactionId: string | null;
+  reversesTransactionId: string | null;
+}
+
+export interface Receipt extends HistoryItem {
+  receiptNumber: string;
+  reason: string | null;
 }
 
 export interface History {

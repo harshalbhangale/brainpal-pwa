@@ -206,4 +206,52 @@ describe("money: requests, savings, cards, allowance, history", { skip: !hasData
     assert.equal(receipt.statusCode, 200);
     assert.match(receipt.json().receiptNumber, /^BP-[0-9A-F]{8}$/);
   });
+
+  test("a parent can reverse a transaction once, and a reversal cannot be reversed", async () => {
+    const sent = await command(parent, "money.transfer", { childMemberId: mayaId, destination: "save", amountMinor: 1_00, title: "Oops" });
+    const tx = sent.json().result.transactionId;
+    const before = (await mine()).saveMinor;
+
+    const rev = await command(parent, "money.reverse", { transactionId: tx, reason: "Sent by mistake" });
+    assert.equal(rev.statusCode, 200, rev.body);
+    assert.equal((await mine()).saveMinor, before - 1_00);
+
+    const again = await command(parent, "money.reverse", { transactionId: tx, reason: "again" });
+    assert.equal(again.json().error.code, "ALREADY_REVERSED");
+
+    const original = (await call("GET", `/v1/money/receipts/${tx}`, parent)).json();
+    assert.equal(original.status, "reversed");
+    assert.equal(original.reversedByTransactionId, rev.json().result.transactionId);
+
+    const reversal = (await call("GET", `/v1/money/receipts/${rev.json().result.transactionId}`, parent)).json();
+    assert.equal(reversal.reversesTransactionId, tx);
+    assert.equal(reversal.reason, "Sent by mistake");
+
+    const back = await command(parent, "money.reverse", { transactionId: rev.json().result.transactionId, reason: "undo" });
+    assert.equal(back.json().error.code, "REVERSAL_NOT_ALLOWED");
+  });
+
+  test("money that has already been spent cannot be reversed", async () => {
+    // $10 was sent to Maya's Spend, but she has since spent and moved some of it.
+    const pocket = (await call("GET", "/v1/money/history?q=Pocket", parent)).json().items[0];
+    const res = await command(parent, "money.reverse", { transactionId: pocket.transactionId, reason: "test" });
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.json().error.code, "REVERSAL_INSUFFICIENT_FUNDS");
+  });
+
+  test("a child cannot reverse anything", async () => {
+    const res = await command(maya, "money.reverse", { transactionId: topupTx, reason: "mine now" });
+    assert.equal(res.json().error.code, "CHILD_CANNOT_MOVE_MONEY");
+  });
+
+  test("a family is created in its own time zone, and a bad one is refused", async () => {
+    const res = await call("POST", "/v1/onboarding/family", mockToken(`test-${crypto.randomUUID()}`), {
+      familyName: "Nowhere",
+      parentName: "P",
+      currency: "AUD",
+      timeZone: "Mars/Olympus",
+    });
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.json().error.code, "INVALID_TIMEZONE");
+  });
 });

@@ -56,9 +56,16 @@ export async function registerBootstrapRoutes(app: FastifyInstance) {
       throw new ApiError(409, "ALREADY_IN_FAMILY", "you already have a family");
     }
 
+    const timeZone = parsed.data.timeZone ?? "Australia/Sydney";
+    try {
+      new Intl.DateTimeFormat("en-AU", { timeZone }).format(0);
+    } catch {
+      throw new ApiError(400, "INVALID_TIMEZONE", `${timeZone} is not a time zone`);
+    }
+
     const [family] = await db
       .insert(families)
-      .values({ name: parsed.data.familyName, currency: parsed.data.currency })
+      .values({ name: parsed.data.familyName, currency: parsed.data.currency, timeZone })
       .returning();
 
     const [member] = await db

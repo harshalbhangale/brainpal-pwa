@@ -8,7 +8,7 @@ import {
   moneyAccounts,
   spendRequests,
 } from "@brainpal/database";
-import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, sql } from "drizzle-orm";
 
 import { type Actor, visibleChildren } from "./engine.js";
 import { MoneyError } from "./errors.js";
@@ -22,6 +22,7 @@ const KIND_LABEL: Record<string, string> = {
   spend: "Spent",
   savings_move: "Savings move",
   boost: "Savings boost",
+  reversal: "Reversal",
 };
 
 export interface HistoryLine {
@@ -37,12 +38,15 @@ export interface HistoryItem {
   kind: string;
   title: string;
   createdAt: string;
-  status: "settled";
+  /** "reversed" once a later reversal has undone it. The original is never edited. */
+  status: "settled" | "reversed";
   /** The amount the transaction moved. */
   amountMinor: number;
   /** The change to the accounts the viewer can see: in is positive, out negative. Top-up sources are not counted. */
   netMinor: number;
   lines: HistoryLine[];
+  reversedByTransactionId: string | null;
+  reversesTransactionId: string | null;
 }
 
 export interface HistoryOptions {
@@ -51,6 +55,22 @@ export interface HistoryOptions {
   memberId?: string | undefined;
   limit?: number | undefined;
 }
+
+type TxRow = {
+  id: string;
+  kind: string;
+  createdAt: Date;
+  metadata: unknown;
+  reversesTransactionId: string | null;
+};
+
+const txColumns = {
+  id: ledgerTransactions.id,
+  kind: ledgerTransactions.kind,
+  createdAt: ledgerTransactions.createdAt,
+  metadata: ledgerTransactions.metadata,
+  reversesTransactionId: ledgerTransactions.reversesTransactionId,
+};
 
 async function visibleAccounts(db: Database, actor: Actor, memberId?: string) {
   return db
@@ -69,13 +89,10 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
-async function build(
-  db: Database,
-  actor: Actor,
-  rows: Array<{ id: string; kind: string; createdAt: Date; metadata: unknown }>,
-  visibleIds: Set<string>,
-): Promise<HistoryItem[]> {
+async function build(db: Database, actor: Actor, rows: TxRow[], visibleIds: Set<string>): Promise<HistoryItem[]> {
   if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.id);
+
   const entries = await db
     .select({
       transactionId: ledgerEntries.transactionId,
@@ -87,7 +104,13 @@ async function build(
     })
     .from(ledgerEntries)
     .innerJoin(moneyAccounts, eq(moneyAccounts.id, ledgerEntries.accountId))
-    .where(inArray(ledgerEntries.transactionId, rows.map((r) => r.id)));
+    .where(inArray(ledgerEntries.transactionId, ids));
+
+  const reversals = await db
+    .select({ id: ledgerTransactions.id, reverses: ledgerTransactions.reversesTransactionId })
+    .from(ledgerTransactions)
+    .where(and(isNotNull(ledgerTransactions.reversesTransactionId), inArray(ledgerTransactions.reversesTransactionId, ids)));
+  const reversedBy = new Map(reversals.map((r) => [r.reverses, r.id]));
 
   const members = await db
     .select({ id: familyMembers.id, displayName: familyMembers.displayName })
@@ -105,12 +128,13 @@ async function build(
     const all = entries.filter((e) => e.transactionId === row.id);
     const shown = all.filter((e) => visibleIds.has(e.accountId));
     const title = (row.metadata as { title?: unknown } | null)?.title;
+    const reversal = reversedBy.get(row.id) ?? null;
     return {
       transactionId: row.id,
       kind: row.kind,
       title: typeof title === "string" ? title : (KIND_LABEL[row.kind] ?? row.kind),
       createdAt: row.createdAt.toISOString(),
-      status: "settled" as const,
+      status: reversal ? ("reversed" as const) : ("settled" as const),
       amountMinor: all.filter((e) => e.direction === "debit").reduce((sum, e) => sum + e.amountMinor, 0),
       netMinor: shown
         .filter((e) => e.purpose !== "external_funding")
@@ -122,6 +146,8 @@ async function build(
         direction: e.direction,
         amountMinor: e.amountMinor,
       })),
+      reversedByTransactionId: reversal,
+      reversesTransactionId: row.reversesTransactionId,
     };
   });
 }
@@ -139,12 +165,7 @@ export async function historyFor(db: Database, actor: Actor, opts: HistoryOption
     ids.length === 0
       ? []
       : await db
-          .selectDistinct({
-            id: ledgerTransactions.id,
-            kind: ledgerTransactions.kind,
-            createdAt: ledgerTransactions.createdAt,
-            metadata: ledgerTransactions.metadata,
-          })
+          .selectDistinct(txColumns)
           .from(ledgerTransactions)
           .innerJoin(ledgerEntries, eq(ledgerEntries.transactionId, ledgerTransactions.id))
           .where(
@@ -206,12 +227,7 @@ export async function receiptFor(db: Database, actor: Actor, transactionId: stri
     ids.length === 0
       ? []
       : await db
-          .selectDistinct({
-            id: ledgerTransactions.id,
-            kind: ledgerTransactions.kind,
-            createdAt: ledgerTransactions.createdAt,
-            metadata: ledgerTransactions.metadata,
-          })
+          .selectDistinct(txColumns)
           .from(ledgerTransactions)
           .innerJoin(ledgerEntries, eq(ledgerEntries.transactionId, ledgerTransactions.id))
           .where(
@@ -225,5 +241,10 @@ export async function receiptFor(db: Database, actor: Actor, transactionId: stri
   // Not found and not visible are the same answer, so receipt ids cannot be probed.
   if (!row) throw new MoneyError("TRANSACTION_NOT_FOUND", "that receipt was not found");
   const [item] = await build(db, actor, [row], new Set(ids));
-  return { ...item!, receiptNumber: `BP-${transactionId.slice(0, 8).toUpperCase()}` };
+  const reason = (row.metadata as { reason?: unknown } | null)?.reason;
+  return {
+    ...item!,
+    receiptNumber: `BP-${transactionId.slice(0, 8).toUpperCase()}`,
+    reason: typeof reason === "string" ? reason : null,
+  };
 }

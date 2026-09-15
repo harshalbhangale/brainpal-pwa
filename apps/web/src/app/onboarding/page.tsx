@@ -53,6 +53,7 @@ export default function Onboarding() {
           familyName: familyName.trim(),
           parentName: parentName.trim(),
           currency: "AUD",
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         });
       } catch (err) {
         // Re-running onboarding with a family already made is not an error.

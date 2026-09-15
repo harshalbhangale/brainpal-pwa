@@ -18,6 +18,8 @@ export const FamilyCreate = z.object({
     /** The creating parent's own name — not the family's. */
     parentName: z.string().min(1).max(40),
     currency: z.literal("AUD"),
+    /** IANA zone, e.g. "Australia/Sydney". Defaults to Sydney when omitted. */
+    timeZone: z.string().min(1).max(64).optional(),
   }),
 });
 
@@ -152,6 +154,14 @@ export const CardChannel = z.object({
   }),
 });
 
+export const MoneyReverse = z.object({
+  command: z.literal("money.reverse"),
+  payload: z.object({
+    transactionId: z.uuid(),
+    reason: z.string().min(1).max(300),
+  }),
+});
+
 /** The money commands a client may send. `chore.pay` and `spend.pay` are not here: only the engine creates them. */
 export const MoneyCommand = z.discriminatedUnion("command", [
   WalletTopup,
@@ -167,6 +177,7 @@ export const MoneyCommand = z.discriminatedUnion("command", [
   CardFreeze,
   CardLimit,
   CardChannel,
+  MoneyReverse,
 ]);
 export type MoneyCommand = z.infer<typeof MoneyCommand>;
 
@@ -195,5 +206,6 @@ export const CommandKind = z.enum([
   "card.freeze",
   "card.limit",
   "card.channel",
+  "money.reverse",
 ]);
 export type CommandKind = z.infer<typeof CommandKind>;

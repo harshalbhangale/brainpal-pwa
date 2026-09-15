@@ -15,8 +15,10 @@ export type RoutingDecision = z.infer<typeof RoutingDecision>;
 
 const SYSTEM = `You route a family request to exactly one PAL.
 
-moneypal — money: saving, spending, pocket money, allowance, chores and what
-they pay, wallets, cards, goals, affordability, prices.
+moneypal — money: balances and how much money someone has, the family
+wallet, saving, spending, pocket money, allowance, chores and what they pay,
+approvals and anything waiting for a parent, spend requests, cards, savings
+goals and progress towards them, affordability, prices.
 tutorpal — learning: homework, subjects, revision, flashcards, quizzes,
 explaining a topic, exam practice, study plans.
 brainpal — anything else: greetings, app questions, family or account setup,
@@ -27,8 +29,13 @@ pocket money when she finishes her maths" is owned by moneypal: the outcome is
 a payment. "Help Maya revise maths so she earns her pocket money" is owned by
 tutorpal: the outcome is learning.
 
-If a request could go either way, prefer brainpal and ask a question rather
-than guessing. Confidence below 0.6 means you are unsure.`;
+"How much money do I have?", "Is anything waiting for me to approve?" and
+"How close am I to my bike?" are all moneypal: they are about this family's
+money, even though they name no amount.
+
+Only when a request truly belongs to no PAL, or could equally be either,
+prefer brainpal and ask a question rather than guessing. Confidence below 0.6
+means you are unsure.`;
 
 /**
  * Routing is a structured-output call, not prose that gets parsed: the model is
@@ -41,7 +48,6 @@ export async function routeRequest(text: string): Promise<RoutingDecision> {
     schema: RoutingDecision,
     system: SYSTEM,
     prompt: text,
-    temperature: 0,
   });
   return object;
 }
