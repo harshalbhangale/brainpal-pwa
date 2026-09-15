@@ -1,7 +1,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { textSections, transcriptSections, youtubeVideoId } from "../dist/transcript.js";
+import { YoutubeTranscripts, textSections, transcriptSections, youtubeVideoId } from "../dist/transcript.js";
+
+test("YouTube refusing BrainPal's servers is told apart from a private video", async () => {
+  const real = globalThis.fetch;
+  const answer = (playabilityStatus: object) =>
+    (async () => new Response(JSON.stringify({ playabilityStatus }))) as unknown as typeof fetch;
+  try {
+    globalThis.fetch = answer({ status: "LOGIN_REQUIRED", reason: "Sign in to confirm you’re not a bot" });
+    await assert.rejects(new YoutubeTranscripts().fetch("8aGhZQkoFbQ"), { code: "YOUTUBE_BLOCKED" });
+    globalThis.fetch = answer({ status: "LOGIN_REQUIRED", reason: "Sign in to confirm your age" });
+    await assert.rejects(new YoutubeTranscripts().fetch("8aGhZQkoFbQ"), { code: "VIDEO_UNAVAILABLE" });
+    globalThis.fetch = answer({ status: "ERROR", reason: "Video unavailable" });
+    await assert.rejects(new YoutubeTranscripts().fetch("8aGhZQkoFbQ"), { code: "VIDEO_UNAVAILABLE" });
+  } finally {
+    globalThis.fetch = real;
+  }
+});
 
 test("every usual form of YouTube link gives the video id, and nothing else does", () => {
   const id = "8aGhZQkoFbQ";

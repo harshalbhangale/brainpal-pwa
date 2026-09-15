@@ -127,7 +127,7 @@ export class YoutubeTranscripts implements TranscriptSource {
       new TutorError("TRANSCRIPT_FAILED", "We could not get this video's captions right now. Paste its transcript or your notes instead.");
 
     let player: {
-      playabilityStatus?: { status?: string };
+      playabilityStatus?: { status?: string; reason?: string };
       videoDetails?: { title?: string };
       captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: CaptionTrack[] } };
     };
@@ -151,8 +151,17 @@ export class YoutubeTranscripts implements TranscriptSource {
       throw unavailable();
     }
 
-    if (player.playabilityStatus?.status !== "OK") {
-      throw new TutorError("VIDEO_UNAVAILABLE", "That video is private, removed or restricted, so TutorPAL cannot use it.");
+    const playability = player.playabilityStatus;
+    // YouTube asks servers in data centres to "sign in to confirm you're not a
+    // bot". That is about where BrainPal runs, not the video, so it says so.
+    if (playability?.status === "LOGIN_REQUIRED" && /bot/i.test(playability.reason ?? "")) {
+      throw new TutorError(
+        "YOUTUBE_BLOCKED",
+        'YouTube is not letting BrainPal read videos right now. On YouTube, open the video, choose "Show transcript", copy it and paste it under Notes.',
+      );
+    }
+    if (playability?.status !== "OK") {
+      throw new TutorError("VIDEO_UNAVAILABLE", "That video is private, removed or age-restricted, so TutorPAL cannot use it.");
     }
     const tracks = player.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
     const english = (t: CaptionTrack) => t.languageCode?.startsWith("en");

@@ -295,6 +295,10 @@ export default function Learn() {
                             url: videoLink.trim(),
                             ...(title.trim() ? { title: title.trim() } : {}),
                             ...f,
+                          }).catch((err: unknown) => {
+                            // YouTube refuses some servers. Pasting the transcript under Notes still works.
+                            if (err instanceof ApiError && err.code === "YOUTUBE_BLOCKED") setMode("text");
+                            throw err;
                           })
                         : await api.post<LearningDocument>("/v1/learning/sources/text", { title: title.trim(), text: notes, ...f });
                   added(doc);
