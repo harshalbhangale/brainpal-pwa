@@ -4,37 +4,63 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { CheatsheetView } from "@/components/learn/CheatsheetView";
+import { DeckReview } from "@/components/learn/DeckReview";
+import { InterviewView } from "@/components/learn/InterviewView";
+import { Timetable } from "@/components/learn/Timetable";
 import {
   ApiError,
   api,
   hasSignedIn,
   uploadLearningFile,
   type AttemptResult,
+  type Cheatsheet,
   type Deck,
+  type DeckSummary,
   type Family,
+  type Interview,
+  type InterviewSummary,
   type LearningDocument,
   type LearningProgress,
   type LearningSource,
   type Me,
   type QuizView,
+  type SourceKind,
+  type StudentProfile,
 } from "@/lib/api";
+import { saveDeckOffline, syncReviews } from "@/lib/offline";
 
 type View =
   | { kind: "home" }
   | { kind: "document"; doc: LearningDocument }
   | { kind: "deck"; deck: Deck }
-  | { kind: "quiz"; quiz: QuizView };
+  | { kind: "quiz"; quiz: QuizView }
+  | { kind: "cheatsheet"; sheet: Cheatsheet }
+  | { kind: "interview"; interview: Interview };
+
+type AddMode = "file" | "youtube" | "text";
 
 const card = "space-y-3 rounded-2xl bg-card p-5 shadow-sm";
 const row = "rounded-xl bg-ground px-4 py-3";
 const input = "w-full min-w-0 rounded-xl border border-line bg-ground px-3 py-2 outline-none focus:border-accent";
 const primary = "shrink-0 rounded-xl bg-tutor px-4 py-2 font-medium text-white disabled:opacity-40";
 const secondary = "shrink-0 rounded-xl border border-line px-4 py-2 font-medium disabled:opacity-40";
+const tab = (on: boolean) => `rounded-lg px-3 py-1.5 text-sm ${on ? "bg-tutor text-white" : "text-muted"}`;
 
 const NEXT_LABEL: Record<string, string> = {
   review_flashcards: "Review with flashcards",
   retry_quiz: "Try the quiz again",
   harder_quiz: "Try a harder quiz",
+};
+
+const KIND_LABEL: Record<SourceKind, string> = { pdf: "PDF", image: "Photo", youtube: "Video", text: "Notes" };
+
+const METHOD_LABEL: Record<string, string> = {
+  pdf_text: "Read from the PDF's own text.",
+  vision: "Read by TutorPAL from the image.",
+  text: "From pasted notes.",
+  youtube_captions: "From the video's captions.",
+  youtube_auto_captions: "From the video's automatic captions, which can mishear. Fix anything that looks wrong.",
 };
 
 export default function Learn() {
@@ -43,29 +69,46 @@ export default function Learn() {
   const [children, setChildren] = useState<Array<{ id: string; displayName: string }>>([]);
   const [target, setTarget] = useState("");
   const [sources, setSources] = useState<LearningSource[]>([]);
+  const [decks, setDecks] = useState<DeckSummary[]>([]);
+  const [sheets, setSheets] = useState<Array<Omit<Cheatsheet, "blocks">>>([]);
+  const [interviews, setInterviews] = useState<InterviewSummary[]>([]);
   const [progress, setProgress] = useState<LearningProgress | null>(null);
+  const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [view, setView] = useState<View>({ kind: "home" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const [mode, setMode] = useState<AddMode>("file");
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
+  const [videoLink, setVideoLink] = useState("");
+  const [notes, setNotes] = useState("");
+  const [subjectId, setSubjectId] = useState("");
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const [cardIndex, setCardIndex] = useState(0);
-  const [showBack, setShowBack] = useState(false);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [result, setResult] = useState<AttemptResult | null>(null);
 
   const parent = me?.role === "parent" || me?.role === "co_guardian";
 
   const loadHome = useCallback(async (who: Me, member: string) => {
-    const [s, p] = await Promise.all([
+    const [s, d, c, i, p, prof] = await Promise.all([
       api.get<{ sources: LearningSource[] }>("/v1/learning/sources"),
+      api.get<{ decks: DeckSummary[] }>("/v1/learning/decks"),
+      api.get<{ cheatsheets: Array<Omit<Cheatsheet, "blocks">> }>("/v1/learning/cheatsheets"),
+      api.get<{ interviews: InterviewSummary[] }>("/v1/learning/interviews"),
       member ? api.get<LearningProgress>(`/v1/learning/progress?memberId=${member}`) : Promise.resolve(null),
+      member ? api.get<StudentProfile>(`/v1/learning/profiles/${member}`) : Promise.resolve(null),
     ]);
-    setSources(who.role === "child" ? s.sources : s.sources.filter((x) => !member || x.ownerMemberId === member));
+    // A parent sees the whole family's material; the page shows one child at a time.
+    const theirs = (owner: string) => who.role === "child" || !member || owner === member;
+    setSources(s.sources.filter((x) => theirs(x.ownerMemberId)));
+    setDecks(d.decks.filter((x) => theirs(x.ownerMemberId)));
+    setSheets(c.cheatsheets.filter((x) => theirs(x.ownerMemberId)));
+    setInterviews(i.interviews.filter((x) => theirs(x.memberId)));
     setProgress(p);
+    setProfile(prof);
+    setSubjectId("");
   }, []);
 
   useEffect(() => {
@@ -73,6 +116,10 @@ export default function Learn() {
       router.replace("/login");
       return;
     }
+    // Flashcard reviews made offline go up as soon as there is a connection.
+    void syncReviews();
+    const back = () => void syncReviews();
+    window.addEventListener("online", back);
     void (async () => {
       try {
         const [who, family] = await Promise.all([api.get<Me>("/v1/me"), api.get<Family>("/v1/families/current")]);
@@ -84,9 +131,11 @@ export default function Learn() {
         await loadHome(who, first);
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) router.replace("/login");
+        else if (err instanceof ApiError && err.status === 0) router.replace("/offline");
         else setError(err instanceof ApiError ? err.message : "Could not load.");
       }
     })();
+    return () => window.removeEventListener("online", back);
   }, [loadHome, router]);
 
   async function act(fn: () => Promise<void>, success?: string) {
@@ -116,11 +165,33 @@ export default function Learn() {
       setView({ kind: "document", doc });
     });
 
+  const openDeck = (deck: Deck) => {
+    saveDeckOffline(deck);
+    setView({ kind: "deck", deck });
+  };
+
   const nameOf = (id: string) => children.find((c) => c.id === id)?.displayName ?? "";
+  const filing = () => ({
+    ...(parent && target ? { memberId: target } : {}),
+    ...(subjectId ? { subjectId } : {}),
+  });
+
+  const added = (doc: LearningDocument) => {
+    setTitle("");
+    setFile(null);
+    setVideoLink("");
+    setNotes("");
+    setEdits({});
+    setView({ kind: "document", doc });
+  };
+
+  const canAdd =
+    Boolean(target) &&
+    (mode === "file" ? Boolean(file) && title.trim().length > 0 : mode === "youtube" ? videoLink.trim().length > 0 : notes.trim().length > 0 && title.trim().length > 0);
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-5 px-5 py-8">
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between print:hidden">
         <h1 className="text-2xl font-semibold tracking-tight">Learn</h1>
         {view.kind === "home" ? (
           <Link href="/home" className="text-sm text-muted underline underline-offset-4">
@@ -149,7 +220,7 @@ export default function Learn() {
                 value={target}
                 onChange={(e) => {
                   setTarget(e.target.value);
-                  if (me) void loadHome(me, e.target.value);
+                  if (me) void act(() => loadHome(me, e.target.value));
                 }}
                 className={input}
               >
@@ -164,31 +235,79 @@ export default function Learn() {
 
           <section className={card}>
             <h2 className="text-sm font-medium">Add learning material</h2>
+            <div className="flex gap-1 rounded-xl bg-ground p-1" role="tablist">
+              {(
+                [
+                  ["file", "Photo or PDF"],
+                  ["youtube", "YouTube"],
+                  ["text", "Notes"],
+                ] as const
+              ).map(([m, label]) => (
+                <button key={m} type="button" role="tab" aria-selected={mode === m} className={tab(mode === m)} onClick={() => setMode(m)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Keyed: without it React reuses one <input> across modes and it flips from uncontrolled to controlled. */}
+            {mode === "file" ? (
+              <input
+                key="file"
+                type="file"
+                accept="application/pdf,image/jpeg,image/png,image/webp"
+                aria-label="Worksheet, photo or PDF"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                className="block w-full text-sm"
+              />
+            ) : mode === "youtube" ? (
+              <input key="youtube" value={videoLink} onChange={(e) => setVideoLink(e.target.value)} placeholder="Paste a YouTube link" inputMode="url" className={input} />
+            ) : (
+              <textarea key="text" value={notes} onChange={(e) => setNotes(e.target.value)} rows={5} placeholder="Paste notes, or a video's transcript" className={input} />
+            )}
             <input
-              type="file"
-              accept="application/pdf,image/jpeg,image/png,image/webp"
-              aria-label="Worksheet, photo or PDF"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={mode === "youtube" ? "Title (optional: we use the video's)" : "What is it? e.g. Maths worksheet"}
+              className={input}
             />
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What is it? e.g. Maths worksheet" className={input} />
+            {profile && profile.subjects.length > 0 ? (
+              <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} aria-label="Subject" className={input}>
+                <option value="">No subject</option>
+                {profile.subjects.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <button
               type="button"
-              disabled={busy || !file || title.trim().length === 0 || !target}
+              disabled={busy || !canAdd}
               className={primary}
               onClick={() =>
                 void act(async () => {
-                  const doc = await uploadLearningFile(file!, title.trim(), parent ? target : undefined);
-                  setTitle("");
-                  setFile(null);
-                  setEdits({});
-                  setView({ kind: "document", doc });
-                }, "Read it. Check anything highlighted before making flashcards or a quiz.")
+                  const f = filing();
+                  const doc =
+                    mode === "file"
+                      ? await uploadLearningFile(file!, title.trim(), f.memberId, f.subjectId)
+                      : mode === "youtube"
+                        ? await api.post<LearningDocument>("/v1/learning/sources/youtube", {
+                            url: videoLink.trim(),
+                            ...(title.trim() ? { title: title.trim() } : {}),
+                            ...f,
+                          })
+                        : await api.post<LearningDocument>("/v1/learning/sources/text", { title: title.trim(), text: notes, ...f });
+                  added(doc);
+                }, "Got it. Check anything highlighted before making flashcards, a quiz or a cheatsheet.")
               }
             >
-              {busy ? "Reading…" : "Upload and read"}
+              {busy ? "Reading…" : mode === "youtube" ? "Get the video's captions" : "Add and read"}
             </button>
-            <p className="text-xs text-muted">A PDF or a photo, up to 10 MB. It stays private to your family.</p>
+            <p className="text-xs text-muted">
+              {mode === "youtube"
+                ? "TutorPAL uses the video's captions. Videos without captions cannot be used; paste notes instead."
+                : "A PDF or photo up to 10 MB, or pasted notes. It stays private to your family."}
+            </p>
           </section>
 
           <section className={card}>
@@ -203,13 +322,65 @@ export default function Learn() {
                 className={`flex w-full justify-between gap-3 text-left ${row}`}
               >
                 <span className="min-w-0 truncate font-medium">{s.title}</span>
-                <span className="shrink-0 text-sm text-muted">
-                  {parent ? `${nameOf(s.ownerMemberId)} · ` : ""}
-                  {s.status === "failed" ? "Could not read" : s.kind.toUpperCase()}
-                </span>
+                <span className="shrink-0 text-sm text-muted">{s.status === "failed" ? "Could not read" : KIND_LABEL[s.kind]}</span>
               </button>
             ))}
           </section>
+
+          {decks.length > 0 ? (
+            <section className={card}>
+              <h2 className="text-sm font-medium">Flashcards</h2>
+              {decks.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void act(async () => openDeck(await api.get<Deck>(`/v1/learning/decks/${d.id}`)))}
+                  className={`flex w-full justify-between gap-3 text-left ${row}`}
+                >
+                  <span className="min-w-0 truncate font-medium">{d.title}</span>
+                  <span className={`shrink-0 text-sm ${d.dueCount > 0 ? "text-tutor" : "text-muted"}`}>
+                    {d.dueCount > 0 ? `${d.dueCount} due` : `${d.cardCount} cards`}
+                  </span>
+                </button>
+              ))}
+            </section>
+          ) : null}
+
+          {sheets.length > 0 ? (
+            <section className={card}>
+              <h2 className="text-sm font-medium">Cheatsheets</h2>
+              {sheets.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void act(async () => setView({ kind: "cheatsheet", sheet: await api.get<Cheatsheet>(`/v1/learning/cheatsheets/${s.id}`) }))}
+                  className={`w-full truncate text-left font-medium ${row}`}
+                >
+                  {s.title}
+                </button>
+              ))}
+            </section>
+          ) : null}
+
+          {interviews.length > 0 ? (
+            <section className={card}>
+              <h2 className="text-sm font-medium">Interviews</h2>
+              {interviews.map((i) => (
+                <button
+                  key={i.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void act(async () => setView({ kind: "interview", interview: await api.get<Interview>(`/v1/learning/interviews/${i.id}`) }))}
+                  className={`flex w-full justify-between gap-3 text-left ${row}`}
+                >
+                  <span className="min-w-0 truncate font-medium">{i.title}</span>
+                  <span className="shrink-0 text-sm text-muted">{i.status === "complete" ? `${i.score}/${i.asked}` : "Carry on"}</span>
+                </button>
+              ))}
+            </section>
+          ) : null}
 
           {progress && progress.progress.length > 0 ? (
             <section className={card}>
@@ -230,6 +401,8 @@ export default function Learn() {
               ))}
             </section>
           ) : null}
+
+          {profile ? <Timetable profile={profile} onChange={setProfile} childName={parent ? nameOf(target) : ""} /> : null}
         </>
       ) : null}
 
@@ -238,7 +411,15 @@ export default function Learn() {
           <section className={card}>
             <h2 className="text-lg font-semibold">{view.doc.title}</h2>
             <p className="text-xs text-muted">
-              {view.doc.method === "pdf_text" ? "Read from the PDF's own text." : "Read by TutorPAL from the image."}
+              {METHOD_LABEL[view.doc.method] ?? ""}
+              {view.doc.sourceUrl ? (
+                <>
+                  {" "}
+                  <a href={view.doc.sourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                    Watch it
+                  </a>
+                </>
+              ) : null}
             </p>
             {view.doc.needsReview > 0 ? (
               <p className="rounded-xl bg-ground px-4 py-3 text-sm text-accent">
@@ -293,10 +474,7 @@ export default function Learn() {
               className={primary}
               onClick={() =>
                 void act(async () => {
-                  const deck = await api.post<Deck>(`/v1/learning/documents/${view.doc.id}/flashcards`, { count: 10 });
-                  setCardIndex(0);
-                  setShowBack(false);
-                  setView({ kind: "deck", deck });
+                  openDeck(await api.post<Deck>(`/v1/learning/documents/${view.doc.id}/flashcards`, { count: 10 }));
                 })
               }
             >
@@ -315,67 +493,58 @@ export default function Learn() {
                 })
               }
             >
-              Make a 5-question quiz
+              5-question quiz
             </button>
+            <button
+              type="button"
+              disabled={busy || view.doc.needsReview > 0}
+              className={secondary}
+              onClick={() =>
+                void act(async () => {
+                  setView({ kind: "cheatsheet", sheet: await api.post<Cheatsheet>(`/v1/learning/documents/${view.doc.id}/cheatsheets`) });
+                })
+              }
+            >
+              Cheatsheet
+            </button>
+            {me?.memberId === view.doc.ownerMemberId ? (
+              <button
+                type="button"
+                disabled={busy || view.doc.needsReview > 0}
+                className={secondary}
+                onClick={() =>
+                  void act(async () => {
+                    setView({
+                      kind: "interview",
+                      interview: await api.post<Interview>(`/v1/learning/documents/${view.doc.id}/interviews`, { count: 5 }),
+                    });
+                  })
+                }
+              >
+                Practice interview
+              </button>
+            ) : null}
           </section>
+          {parent ? (
+            <p className="text-xs text-muted">
+              Interviews, quizzes and reviews count towards {nameOf(view.doc.ownerMemberId) || "the child"}'s own progress, so only they can take them.
+            </p>
+          ) : null}
         </>
       ) : null}
 
-      {view.kind === "deck"
-        ? (() => {
-            const current = view.deck.cards[cardIndex];
-            if (!current) {
-              return (
-                <section className={card}>
-                  <p className="font-medium">All done for now.</p>
-                  <p className="text-sm text-muted">These cards will come back when they are due.</p>
-                </section>
-              );
-            }
-            return (
-              <section className={card}>
-                <p className="text-xs text-muted">
-                  Card {cardIndex + 1} of {view.deck.cards.length}
-                </p>
-                <p className="text-lg font-semibold">{current.front}</p>
-                {showBack ? (
-                  <>
-                    <p className="whitespace-pre-wrap rounded-xl bg-ground px-4 py-3">{current.back}</p>
-                    {me?.memberId === view.deck.ownerMemberId ? (
-                      <div className="flex flex-wrap gap-2">
-                        {(["again", "hard", "good", "easy"] as const).map((grade) => (
-                          <button
-                            key={grade}
-                            type="button"
-                            disabled={busy}
-                            className={grade === "good" ? primary : secondary}
-                            onClick={() =>
-                              void act(async () => {
-                                await api.post(`/v1/learning/cards/${current.id}/review`, { grade });
-                                setShowBack(false);
-                                setCardIndex(cardIndex + 1);
-                              })
-                            }
-                          >
-                            {grade === "again" ? "Again" : grade === "hard" ? "Hard" : grade === "good" ? "Got it" : "Easy"}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <button type="button" className={secondary} onClick={() => { setShowBack(false); setCardIndex(cardIndex + 1); }}>
-                        Next card
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <button type="button" className={primary} onClick={() => setShowBack(true)}>
-                    Show answer
-                  </button>
-                )}
-              </section>
-            );
-          })()
-        : null}
+      {view.kind === "deck" ? (
+        <>
+          <DeckReview key={view.deck.id} deck={view.deck} canGrade={me?.memberId === view.deck.ownerMemberId} onError={setError} />
+          <p className="text-xs text-muted">Saved on this device, so it works offline too.</p>
+        </>
+      ) : null}
+
+      {view.kind === "cheatsheet" ? <CheatsheetView sheet={view.sheet} /> : null}
+
+      {view.kind === "interview" ? (
+        <InterviewView key={view.interview.id} initial={view.interview} canAnswer={me?.memberId === view.interview.memberId} />
+      ) : null}
 
       {view.kind === "quiz" ? (
         <>
@@ -434,9 +603,7 @@ export default function Learn() {
                               });
                               setResult({
                                 ...result!,
-                                results: result!.results.map((r) =>
-                                  r.questionId === q.id ? { ...r, correctAnswer: revealed.answer } : r,
-                                ),
+                                results: result!.results.map((r) => (r.questionId === q.id ? { ...r, correctAnswer: revealed.answer } : r)),
                               });
                             })
                           }

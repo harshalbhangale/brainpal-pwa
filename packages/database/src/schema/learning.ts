@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -15,7 +17,7 @@ import {
 
 import { families, familyMembers } from "./identity.js";
 
-export const learningSourceKind = pgEnum("learning_source_kind", ["pdf", "image"]);
+export const learningSourceKind = pgEnum("learning_source_kind", ["pdf", "image", "youtube", "text"]);
 export const learningSourceStatus = pgEnum("learning_source_status", ["uploaded", "ready", "failed"]);
 export const flashcardState = pgEnum("flashcard_state", ["new", "learning", "review", "known"]);
 
@@ -77,6 +79,8 @@ export const learningSources = pgTable(
     kind: learningSourceKind("kind").notNull(),
     title: text("title").notNull(),
     storageKey: text("storage_key").notNull(),
+    /** Where a linked source came from, e.g. the YouTube video. Null for uploads. */
+    sourceUrl: text("source_url"),
     mimeType: text("mime_type").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
     status: learningSourceStatus("status").notNull().default("uploaded"),
@@ -263,9 +267,19 @@ export const learningEvidence = pgTable(
     correct: boolean("correct").notNull(),
     confidence: real("confidence").notNull(),
     detail: jsonb("detail"),
+    /**
+     * Set by a client that recorded the evidence offline and sends it later.
+     * Unique per member, so a sync that is retried cannot count a review twice.
+     */
+    clientRef: uuid("client_ref"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("learning_evidence_member_idx").on(table.memberId, table.createdAt)],
+  (table) => [
+    index("learning_evidence_member_idx").on(table.memberId, table.createdAt),
+    uniqueIndex("learning_evidence_client_ref_key")
+      .on(table.memberId, table.clientRef)
+      .where(sql`${table.clientRef} is not null`),
+  ],
 );
 
 export interface NextStep {
@@ -293,4 +307,101 @@ export const learningProgress = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("learning_progress_member_document_key").on(table.memberId, table.documentId)],
+);
+
+/** A weekly class: "Maths, Monday 09:00–09:50". Times are the family's local time. */
+export const classSessions = pgTable(
+  "class_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => familyMembers.id, { onDelete: "cascade" }),
+    subjectId: uuid("subject_id")
+      .notNull()
+      .references(() => subjects.id, { onDelete: "cascade" }),
+    /** 0 = Sunday … 6 = Saturday. */
+    weekday: integer("weekday").notNull(),
+    startsAt: text("starts_at").notNull(),
+    endsAt: text("ends_at").notNull(),
+    location: text("location"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("class_sessions_member_idx").on(table.memberId, table.weekday),
+    check("class_sessions_weekday_check", sql`${table.weekday} between 0 and 6`),
+    check(
+      "class_sessions_times_check",
+      sql`${table.startsAt} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$' and ${table.endsAt} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$' and ${table.endsAt} > ${table.startsAt}`,
+    ),
+  ],
+);
+
+export interface CheatsheetBlock {
+  heading: string;
+  points: Array<{ text: string; sectionId: string | null }>;
+}
+
+/** A one-page summary of a document. Every point names the section it came from. */
+export const cheatsheets = pgTable(
+  "cheatsheets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    ownerMemberId: uuid("owner_member_id")
+      .notNull()
+      .references(() => familyMembers.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").references(() => learningDocuments.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    blocks: jsonb("blocks").$type<CheatsheetBlock[]>().notNull(),
+    createdByMemberId: uuid("created_by_member_id").references(() => familyMembers.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("cheatsheets_owner_idx").on(table.ownerMemberId)],
+);
+
+/**
+ * One interview question and how it went. `answer` is what TutorPAL expects
+ * and, like a quiz answer, never leaves the server unless it is asked for.
+ */
+export interface InterviewQuestion {
+  id: string;
+  prompt: string;
+  answer: string;
+  sectionId: string | null;
+  replies: Array<{ text: string; correct: boolean; confidence: number; feedback: string }>;
+  /** Settled: answered right, or out of tries. */
+  done: boolean;
+  revealed: boolean;
+}
+
+export const interviewStatus = pgEnum("interview_status", ["active", "complete"]);
+
+/** A spoken or typed back-and-forth: TutorPAL asks, the child answers, one question at a time. */
+export const interviewSessions = pgTable(
+  "interview_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => familyMembers.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").references(() => learningDocuments.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    status: interviewStatus("status").notNull().default("active"),
+    questionCount: integer("question_count").notNull(),
+    questions: jsonb("questions").$type<InterviewQuestion[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("interview_sessions_member_idx").on(table.memberId, table.createdAt)],
 );

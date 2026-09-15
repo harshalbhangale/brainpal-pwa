@@ -6,6 +6,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@brainpal/web", "dev"],
       "port": 3000
+    },
+    {
+      "name": "brainpal-api",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["MOCK_AUTH=false", "pnpm", "--filter", "@brainpal/api", "dev"],
+      "port": 3001
     }
   ]
 }

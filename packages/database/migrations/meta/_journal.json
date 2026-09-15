@@ -57,6 +57,13 @@
       "when": 1789478979522,
       "tag": "0007_tutorpal_core",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789498845689,
+      "tag": "0008_tutorpal_phase3",
+      "breakpoints": true
     }
   ]
 }

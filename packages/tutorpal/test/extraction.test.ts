@@ -14,6 +14,9 @@ setTutorAi({
   makeFlashcards: async () => [],
   makeQuiz: async () => [],
   markShortAnswer: async () => ({ correct: false, confidence: 1, feedback: "" }),
+  makeCheatsheet: async () => [],
+  interviewQuestion: async () => null,
+  transcribe: async () => "",
 });
 
 /** A real, minimal one-page PDF with a text layer. Offsets are computed, so pdf.js reads it like any other. */

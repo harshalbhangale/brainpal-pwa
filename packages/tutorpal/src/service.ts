@@ -5,8 +5,8 @@ import {
   type NextStep,
   type QuizQuestion,
   type QuizResult,
+  classSessions,
   documentSections,
-  familyMembers,
   flashcardDecks,
   flashcards,
   learningDocuments,
@@ -18,21 +18,33 @@ import {
   studentProfiles,
   subjects,
 } from "@brainpal/database";
-import { and, asc, desc, eq, ne } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 
+import {
+  type Actor,
+  assertOwner,
+  assertVisible,
+  childOf,
+  clamp,
+  documentFor,
+  groundedSections,
+  isParent,
+  nextStepFor,
+  normalise,
+  notFound,
+  recordProgress,
+  sectionsOf,
+  sourceFor,
+  subjectFor,
+} from "./access.js";
 import { type ExtractedSection, tutorAi } from "./ai.js";
 import { TutorError } from "./errors.js";
 import { extractPdf } from "./extraction.js";
 import { type Grade, schedule } from "./srs.js";
 import { blobStore } from "./storage.js";
+import { type Transcript, textSections, transcriptSections, transcriptSource, youtubeVideoId } from "./transcript.js";
 
-export type Role = "parent" | "co_guardian" | "child";
-
-export interface Actor {
-  memberId: string;
-  familyId: string;
-  role: Role;
-}
+export type { Actor, Role } from "./access.js";
 
 export const ACCEPTED_TYPES: Record<string, "pdf" | "image"> = {
   "application/pdf": "pdf",
@@ -42,95 +54,37 @@ export const ACCEPTED_TYPES: Record<string, "pdf" | "image"> = {
 };
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_TEXT_CHARS = 100_000;
+/** What browsers' MediaRecorder produces: WebM in Chrome and Firefox, MP4 in Safari. */
+export const AUDIO_TYPES = ["audio/webm", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-m4a", "audio/aac"];
+export const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
 const REVIEW_BELOW = 0.85;
 const UNSURE_MARK_BELOW = 0.7;
-const MASTERY_WINDOW = 20;
-
-const isParent = (actor: Actor) => actor.role === "parent" || actor.role === "co_guardian";
-const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
-const normalise = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
-
-const notFound = () => new TutorError("NOT_FOUND", "That was not found.");
-
-/**
- * A parent sees every child's material; a child sees only their own. Refusal
- * reads exactly like absence, so one child cannot learn another's ids exist.
- */
-function assertVisible(actor: Actor, ownerMemberId: string): void {
-  if (!isParent(actor) && actor.memberId !== ownerMemberId) throw notFound();
-}
-
-/** Attempts and reviews are evidence of the child's own learning, so only they can make them. */
-function assertOwner(actor: Actor, ownerMemberId: string, what: string): void {
-  if (actor.memberId !== ownerMemberId) {
-    throw new TutorError("CHILD_ONLY", `${what} count towards the child's own learning, so only they can do it.`);
-  }
-}
-
-async function childOf(db: Database, familyId: string, memberId: string) {
-  const [child] = await db
-    .select({ id: familyMembers.id, displayName: familyMembers.displayName })
-    .from(familyMembers)
-    .where(
-      and(
-        eq(familyMembers.id, memberId),
-        eq(familyMembers.familyId, familyId),
-        eq(familyMembers.role, "child"),
-        ne(familyMembers.status, "removed"),
-      ),
-    )
-    .limit(1);
-  if (!child) throw new TutorError("NOT_FOUND", "That child is not in this family.");
-  return child;
-}
-
-async function sourceFor(db: Database, actor: Actor, sourceId: string) {
-  const [source] = await db
-    .select()
-    .from(learningSources)
-    .where(and(eq(learningSources.id, sourceId), eq(learningSources.familyId, actor.familyId)))
-    .limit(1);
-  if (!source) throw notFound();
-  assertVisible(actor, source.ownerMemberId);
-  return source;
-}
-
-async function documentFor(db: Database, actor: Actor, documentId: string) {
-  const [row] = await db
-    .select({ doc: learningDocuments, source: learningSources })
-    .from(learningDocuments)
-    .innerJoin(learningSources, eq(learningSources.id, learningDocuments.sourceId))
-    .where(and(eq(learningDocuments.id, documentId), eq(learningDocuments.familyId, actor.familyId)))
-    .limit(1);
-  if (!row) throw notFound();
-  assertVisible(actor, row.source.ownerMemberId);
-  return row;
-}
-
-function sectionsOf(db: Database, documentId: string) {
-  return db
-    .select()
-    .from(documentSections)
-    .where(eq(documentSections.documentId, documentId))
-    .orderBy(asc(documentSections.position));
-}
+/** How far back an offline review may be dated. Anything older is dated when it arrives. */
+const OFFLINE_WINDOW_MS = 30 * 86_400_000;
 
 // ---------- Material ----------
 
-export async function uploadSource(
+interface Owner {
+  ownerMemberId?: string | undefined;
+  subjectId?: string | undefined;
+}
+
+async function storeSource(
   db: Database,
   actor: Actor,
-  input: { ownerMemberId?: string | undefined; title: string; mimeType: string; bytes: Uint8Array },
+  input: Owner & {
+    kind: "pdf" | "image" | "youtube" | "text";
+    title: string;
+    mimeType: string;
+    bytes: Uint8Array;
+    sourceUrl?: string | undefined;
+  },
 ) {
-  const kind = ACCEPTED_TYPES[input.mimeType];
-  if (!kind) throw new TutorError("UNSUPPORTED_FILE", "Upload a PDF or a photo (JPEG, PNG or WebP).");
-  if (input.bytes.byteLength === 0 || input.bytes.byteLength > MAX_UPLOAD_BYTES) {
-    throw new TutorError("FILE_TOO_LARGE", "Files can be up to 10 MB.");
-  }
-
   const ownerMemberId = input.ownerMemberId ?? actor.memberId;
   assertVisible(actor, ownerMemberId);
   await childOf(db, actor.familyId, ownerMemberId);
+  if (input.subjectId) await subjectFor(db, actor, input.subjectId, ownerMemberId);
 
   const id = randomUUID();
   const storageKey = `families/${actor.familyId}/sources/${id}`;
@@ -140,14 +94,66 @@ export async function uploadSource(
     familyId: actor.familyId,
     ownerMemberId,
     uploadedByMemberId: actor.memberId,
-    kind,
-    title: input.title,
+    subjectId: input.subjectId ?? null,
+    kind: input.kind,
+    title: input.title.slice(0, 200),
     storageKey,
+    sourceUrl: input.sourceUrl ?? null,
     mimeType: input.mimeType,
     sizeBytes: input.bytes.byteLength,
   });
 
   return extractSource(db, actor, id);
+}
+
+export async function uploadSource(
+  db: Database,
+  actor: Actor,
+  input: Owner & { title: string; mimeType: string; bytes: Uint8Array },
+) {
+  const kind = ACCEPTED_TYPES[input.mimeType];
+  if (!kind) throw new TutorError("UNSUPPORTED_FILE", "Upload a PDF or a photo (JPEG, PNG or WebP).");
+  if (input.bytes.byteLength === 0 || input.bytes.byteLength > MAX_UPLOAD_BYTES) {
+    throw new TutorError("FILE_TOO_LARGE", "Files can be up to 10 MB.");
+  }
+  return storeSource(db, actor, { ...input, kind });
+}
+
+/** Pasted notes or a transcript. Stored like a file, so it is re-read and deleted the same way. */
+export async function addTextSource(db: Database, actor: Actor, input: Owner & { title: string; text: string }) {
+  const text = input.text.trim();
+  if (!text) throw new TutorError("NOTHING_FOUND", "There is no text to use.");
+  if (text.length > MAX_TEXT_CHARS) throw new TutorError("FILE_TOO_LARGE", "Notes can be up to 100,000 characters.");
+  return storeSource(db, actor, {
+    ...input,
+    kind: "text",
+    mimeType: "text/plain",
+    bytes: new TextEncoder().encode(text),
+  });
+}
+
+/**
+ * A YouTube video, by its captions. The transcript is stored, so the video
+ * being edited or taken down later does not change material already made from it.
+ */
+export async function addYoutubeSource(db: Database, actor: Actor, input: Owner & { url: string; title?: string | undefined }) {
+  const videoId = youtubeVideoId(input.url);
+  if (!videoId) throw new TutorError("INVALID_LINK", "That does not look like a YouTube video link.");
+  // Settle who it is for before reaching out to YouTube.
+  const ownerMemberId = input.ownerMemberId ?? actor.memberId;
+  assertVisible(actor, ownerMemberId);
+  await childOf(db, actor.familyId, ownerMemberId);
+
+  const transcript = await transcriptSource().fetch(videoId);
+  return storeSource(db, actor, {
+    ownerMemberId,
+    subjectId: input.subjectId,
+    kind: "youtube",
+    title: input.title?.trim() || transcript.title,
+    mimeType: "application/json",
+    bytes: new TextEncoder().encode(JSON.stringify(transcript)),
+    sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
+  });
 }
 
 /** Reads the stored file. A failure is recorded on the source, so it can be retried rather than lost. */
@@ -160,6 +166,13 @@ export async function extractSource(db: Database, actor: Actor, sourceId: string
     const bytes = await blobStore().get(source.storageKey);
     if (source.kind === "pdf") {
       ({ method, sections } = await extractPdf(bytes));
+    } else if (source.kind === "text") {
+      method = "text";
+      sections = textSections(new TextDecoder().decode(bytes));
+    } else if (source.kind === "youtube") {
+      const transcript = JSON.parse(new TextDecoder().decode(bytes)) as Transcript;
+      method = transcript.auto ? "youtube_auto_captions" : "youtube_captions";
+      sections = transcriptSections(transcript);
     } else {
       method = "vision";
       sections = await tutorAi().read(bytes, source.mimeType, "photo");
@@ -208,6 +221,8 @@ export async function listSources(db: Database, actor: Actor) {
       kind: learningSources.kind,
       status: learningSources.status,
       errorCode: learningSources.errorCode,
+      subjectId: learningSources.subjectId,
+      sourceUrl: learningSources.sourceUrl,
       ownerMemberId: learningSources.ownerMemberId,
       createdAt: learningSources.createdAt,
       documentId: learningDocuments.id,
@@ -231,6 +246,7 @@ export async function getDocument(db: Database, actor: Actor, documentId: string
     sourceId: source.id,
     title: source.title,
     kind: source.kind,
+    sourceUrl: source.sourceUrl,
     ownerMemberId: source.ownerMemberId,
     method: doc.method,
     needsReview: sections.filter((s) => s.needsReview).length,
@@ -271,24 +287,6 @@ export async function correctSection(db: Database, actor: Actor, sectionId: stri
     })
     .where(eq(documentSections.id, sectionId));
   return getDocument(db, actor, row.section.documentId);
-}
-
-/** Nothing is generated from text nobody has checked: a misread number would become a wrong answer. */
-async function groundedSections(db: Database, actor: Actor, documentId: string) {
-  const { source } = await documentFor(db, actor, documentId);
-  const sections = await sectionsOf(db, documentId);
-  const pending = sections.filter((s) => s.needsReview).length;
-  if (pending > 0) {
-    throw new TutorError(
-      "NEEDS_REVIEW",
-      `${pending} part${pending === 1 ? "" : "s"} of this material could not be read clearly. Check ${pending === 1 ? "it" : "them"} first.`,
-      { pending },
-    );
-  }
-  return {
-    source,
-    sections: sections.map((s) => ({ id: s.id, heading: s.heading, text: s.correctedText ?? s.text })),
-  };
 }
 
 // ---------- Flashcards ----------
@@ -334,14 +332,18 @@ export async function listDecks(db: Database, actor: Actor) {
       ownerMemberId: flashcardDecks.ownerMemberId,
       documentId: flashcardDecks.documentId,
       createdAt: flashcardDecks.createdAt,
+      cardCount: sql<number>`count(${flashcards.id})::int`,
+      dueCount: sql<number>`(count(${flashcards.id}) filter (where ${flashcards.dueAt} <= now()))::int`,
     })
     .from(flashcardDecks)
+    .leftJoin(flashcards, eq(flashcards.deckId, flashcardDecks.id))
     .where(
       and(
         eq(flashcardDecks.familyId, actor.familyId),
         ...(isParent(actor) ? [] : [eq(flashcardDecks.ownerMemberId, actor.memberId)]),
       ),
     )
+    .groupBy(flashcardDecks.id)
     .orderBy(desc(flashcardDecks.createdAt));
 }
 
@@ -374,7 +376,18 @@ export async function getDeck(db: Database, actor: Actor, deckId: string) {
   };
 }
 
-export async function reviewCard(db: Database, actor: Actor, cardId: string, grade: Grade) {
+/**
+ * A review made offline arrives later with the time it was made and a
+ * client-chosen reference. The time schedules the card as if it had arrived
+ * then; the reference makes a retried sync a replay, not a second review.
+ */
+export async function reviewCard(
+  db: Database,
+  actor: Actor,
+  cardId: string,
+  grade: Grade,
+  opts: { reviewedAt?: Date | undefined; clientRef?: string | undefined } = {},
+) {
   const [row] = await db
     .select({ card: flashcards, owner: flashcardDecks.ownerMemberId, documentId: flashcardDecks.documentId })
     .from(flashcards)
@@ -385,22 +398,42 @@ export async function reviewCard(db: Database, actor: Actor, cardId: string, gra
   assertVisible(actor, row.owner);
   assertOwner(actor, row.owner, "Reviews");
 
-  const next = schedule(row.card, grade, new Date());
-  await db.transaction(async (tx) => {
+  const now = new Date();
+  const age = opts.reviewedAt ? now.getTime() - opts.reviewedAt.getTime() : -1;
+  const at = opts.reviewedAt && age >= 0 && age <= OFFLINE_WINDOW_MS ? opts.reviewedAt : now;
+
+  const next = schedule(row.card, grade, at);
+  const applied = await db.transaction(async (tx) => {
+    const recorded = await tx
+      .insert(learningEvidence)
+      .values({
+        familyId: actor.familyId,
+        memberId: actor.memberId,
+        documentId: row.documentId,
+        sectionId: row.card.sectionId,
+        kind: "flashcard_review",
+        refId: cardId,
+        correct: grade !== "again",
+        confidence: 1,
+        detail: { grade, ...(at === now ? {} : { offline: true }) },
+        clientRef: opts.clientRef ?? null,
+        createdAt: at,
+      })
+      .onConflictDoNothing()
+      .returning({ id: learningEvidence.id });
+    if (recorded.length === 0) return false;
     await tx.update(flashcards).set(next).where(eq(flashcards.id, cardId));
-    await tx.insert(learningEvidence).values({
-      familyId: actor.familyId,
-      memberId: actor.memberId,
-      documentId: row.documentId,
-      sectionId: row.card.sectionId,
-      kind: "flashcard_review",
-      refId: cardId,
-      correct: grade !== "again",
-      confidence: 1,
-      detail: { grade },
-    });
+    return true;
   });
-  return { id: cardId, state: next.state, intervalDays: next.intervalDays, dueAt: next.dueAt.toISOString() };
+
+  const card = applied ? next : row.card;
+  return {
+    id: cardId,
+    state: card.state,
+    intervalDays: card.intervalDays,
+    dueAt: card.dueAt.toISOString(),
+    replayed: !applied,
+  };
 }
 
 // ---------- Quizzes ----------
@@ -561,16 +594,7 @@ export async function submitAttempt(
       quiz.questions.flatMap((q, i) => (!results[i]!.correct && q.sectionId ? [q.sectionId] : [])),
     ),
   ];
-  const nextStep: NextStep =
-    missedSections.length > 0
-      ? {
-          activity: "review_flashcards",
-          reason: `Go over the ${missedSections.length === 1 ? "part" : `${missedSections.length} parts`} you missed with flashcards, then try the quiz again.`,
-          sectionIds: missedSections,
-        }
-      : score === results.length
-        ? { activity: "harder_quiz", reason: "Every answer was right. Try a harder quiz next.", sectionIds: [] }
-        : { activity: "retry_quiz", reason: "Have another go at the quiz.", sectionIds: [] };
+  const nextStep = nextStepFor(missedSections, score === results.length);
 
   const { attemptId, mastery } = await db.transaction(async (tx) => {
     const [attempt] = await tx
@@ -592,29 +616,7 @@ export async function submitAttempt(
       })),
     );
 
-    let mastery: number | null = null;
-    if (quiz.documentId) {
-      const recent = await tx
-        .select({ correct: learningEvidence.correct })
-        .from(learningEvidence)
-        .where(
-          and(
-            eq(learningEvidence.memberId, actor.memberId),
-            eq(learningEvidence.documentId, quiz.documentId),
-            eq(learningEvidence.kind, "quiz_answer"),
-          ),
-        )
-        .orderBy(desc(learningEvidence.createdAt))
-        .limit(MASTERY_WINDOW);
-      mastery = Math.round((recent.filter((r) => r.correct).length / recent.length) * 100) / 100;
-      await tx
-        .insert(learningProgress)
-        .values({ familyId: actor.familyId, memberId: actor.memberId, documentId: quiz.documentId, mastery, nextStep })
-        .onConflictDoUpdate({
-          target: [learningProgress.memberId, learningProgress.documentId],
-          set: { mastery, nextStep, updatedAt: new Date() },
-        });
-    }
+    const mastery = quiz.documentId ? await recordProgress(tx, actor, quiz.documentId, nextStep) : null;
     return { attemptId: attempt!.id, mastery };
   });
 
@@ -696,14 +698,44 @@ export async function getProfile(db: Database, actor: Actor, memberId: string) {
     .from(subjects)
     .where(eq(subjects.memberId, memberId))
     .orderBy(asc(subjects.name));
+  const classes = await db
+    .select({
+      id: classSessions.id,
+      subjectId: classSessions.subjectId,
+      weekday: classSessions.weekday,
+      startsAt: classSessions.startsAt,
+      endsAt: classSessions.endsAt,
+      location: classSessions.location,
+    })
+    .from(classSessions)
+    .where(eq(classSessions.memberId, memberId))
+    .orderBy(asc(classSessions.weekday), asc(classSessions.startsAt));
   return {
     memberId,
     schoolYear: profile?.schoolYear ?? null,
     curriculum: profile?.curriculum ?? null,
     goals: profile?.goals ?? null,
     studyTimes: profile?.studyTimes ?? null,
-    subjects: subjectRows,
+    subjects: subjectRows.map((s) => ({ ...s, classes: classes.filter((c) => c.subjectId === s.id) })),
   };
+}
+
+// ---------- Voice ----------
+
+/** Speech in, text out. The recording is not kept: only the words the child then sends are. */
+export async function transcribeSpeech(bytes: Uint8Array, mimeType: string) {
+  if (!AUDIO_TYPES.includes(mimeType)) throw new TutorError("UNSUPPORTED_FILE", "That recording format is not supported.");
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_AUDIO_BYTES) {
+    throw new TutorError("FILE_TOO_LARGE", "Recordings can be up to 5 MB, about five minutes.");
+  }
+  let text: string;
+  try {
+    text = await tutorAi().transcribe(bytes);
+  } catch {
+    throw new TutorError("TRANSCRIPTION_FAILED", "We could not understand that recording. Try again, or type your answer.");
+  }
+  if (!text) throw new TutorError("NOTHING_HEARD", "We did not catch that. Try again a little closer to the microphone.");
+  return { text };
 }
 
 export async function saveProfile(

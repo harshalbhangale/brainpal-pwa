@@ -47,6 +47,9 @@ const fakeAi: TutorAi = {
     given.trim() === question.answer
       ? { correct: true, confidence: 1, feedback: "Nice work." }
       : { correct: false, confidence: 0.9, feedback: "Check your multiplication again." },
+  makeCheatsheet: async () => [],
+  interviewQuestion: async () => null,
+  transcribe: async () => "",
 };
 
 describe("TutorPAL: the worksheet loop", { skip: !hasDatabase }, () => {

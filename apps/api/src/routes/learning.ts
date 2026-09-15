@@ -1,25 +1,43 @@
 import { getDb } from "@brainpal/database";
 import {
   ACCEPTED_TYPES,
+  AUDIO_TYPES,
+  MAX_AUDIO_BYTES,
+  MAX_TEXT_CHARS,
   MAX_UPLOAD_BYTES,
   TutorError,
+  addClass,
   addSubject,
+  addTextSource,
+  addYoutubeSource,
+  answerInterview,
   correctSection,
+  createCheatsheet,
   createDeck,
   createQuiz,
   extractSource,
+  getCheatsheet,
   getDeck,
   getDocument,
+  getInterview,
   getProfile,
   getQuiz,
+  listCheatsheets,
   listDecks,
+  listInterviews,
   listQuizzes,
   listSources,
   progressFor,
+  removeClass,
+  removeSubject,
   revealAnswer,
+  revealInterviewAnswer,
   reviewCard,
   saveProfile,
+  startInterview,
   submitAttempt,
+  transcribeSpeech,
+  updateSubject,
   uploadSource,
 } from "@brainpal/tutorpal";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -36,6 +54,16 @@ const STATUS: Record<string, number> = {
   NOTHING_FOUND: 422,
   NOTHING_GENERATED: 502,
   EXTRACTION_FAILED: 502,
+  INVALID_LINK: 400,
+  INVALID_TIMES: 400,
+  VIDEO_UNAVAILABLE: 422,
+  NO_TRANSCRIPT: 422,
+  NOTHING_HEARD: 422,
+  TRANSCRIPT_FAILED: 502,
+  TRANSCRIPTION_FAILED: 502,
+  INTERVIEW_OVER: 409,
+  NOT_YET: 409,
+  CONFLICT: 409,
 };
 
 async function tutor<T>(fn: () => Promise<T>): Promise<T> {
@@ -48,6 +76,9 @@ async function tutor<T>(fn: () => Promise<T>): Promise<T> {
     throw error;
   }
 }
+
+const mimeOf = (request: FastifyRequest) =>
+  String(request.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
 
 const actorOf = (request: FastifyRequest) => ({
   memberId: request.principal.memberId,
@@ -63,14 +94,32 @@ function parse<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
   return parsed.data;
 }
 
-const UploadQuery = z.object({ title: z.string().min(1).max(200), memberId: z.uuid().optional() });
+const Filing = { memberId: z.uuid().optional(), subjectId: z.uuid().optional() };
+const UploadQuery = z.object({ title: z.string().min(1).max(200), ...Filing });
+const TextSource = z.object({ title: z.string().min(1).max(200), text: z.string().min(1).max(MAX_TEXT_CHARS), ...Filing });
+const YoutubeSource = z.object({ url: z.string().min(1).max(500), title: z.string().max(200).optional(), ...Filing });
+const InterviewRequest = z.object({ count: z.number().int().min(1).max(10).optional() });
+const InterviewAnswer = z.object({ text: z.string().trim().min(1).max(1000) });
+const RevealQuestion = z.object({ questionId: z.uuid() });
+const SubjectUpdate = z.object({ nextExamDate: z.iso.date().nullable() });
+const ClassRequest = z.object({
+  weekday: z.number().int().min(0).max(6),
+  startsAt: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endsAt: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  location: z.string().max(80).optional(),
+});
 const Correction = z.object({ text: z.string().min(1).max(20_000) });
 const DeckRequest = z.object({ count: z.number().int().min(1).max(30).optional() });
 const QuizRequest = z.object({
   count: z.number().int().min(1).max(15).optional(),
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
 });
-const Review = z.object({ grade: z.enum(["again", "hard", "good", "easy"]) });
+const Review = z.object({
+  grade: z.enum(["again", "hard", "good", "easy"]),
+  // Sent by a review made offline and synced later.
+  reviewedAt: z.iso.datetime({ offset: true }).optional(),
+  clientRef: z.uuid().optional(),
+});
 const Attempt = z.object({
   answers: z.array(z.object({ questionId: z.uuid(), answer: z.string().max(500) })).max(30),
 });
@@ -93,9 +142,15 @@ export async function registerLearningRoutes(app: FastifyInstance) {
     (_request, body, done) => done(null, body),
   );
 
+  // Voice answers: the recording is the body. Matched by prefix, since
+  // browsers add codec parameters ("audio/webm;codecs=opus").
+  app.addContentTypeParser(/^audio\//, { parseAs: "buffer", bodyLimit: MAX_AUDIO_BYTES }, (_request, body, done) =>
+    done(null, body),
+  );
+
   app.post("/v1/learning/sources", { bodyLimit: MAX_UPLOAD_BYTES }, async (request) => {
     const query = parse(UploadQuery, request.query, "upload");
-    const mimeType = String(request.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
+    const mimeType = mimeOf(request);
     if (!Buffer.isBuffer(request.body)) {
       throw new ApiError(415, "UNSUPPORTED_FILE", "Upload a PDF or a photo (JPEG, PNG or WebP).");
     }
@@ -105,9 +160,42 @@ export async function registerLearningRoutes(app: FastifyInstance) {
         title: query.title,
         mimeType,
         bytes,
-        ...(query.memberId ? { ownerMemberId: query.memberId } : {}),
+        ownerMemberId: query.memberId,
+        subjectId: query.subjectId,
       }),
     );
+  });
+
+  app.post("/v1/learning/sources/text", { bodyLimit: MAX_TEXT_CHARS * 4 + 4096 }, async (request) => {
+    const body = parse(TextSource, request.body, "notes");
+    return tutor(() =>
+      addTextSource(getDb(), actorOf(request), {
+        title: body.title,
+        text: body.text,
+        ownerMemberId: body.memberId,
+        subjectId: body.subjectId,
+      }),
+    );
+  });
+
+  app.post("/v1/learning/sources/youtube", async (request) => {
+    const body = parse(YoutubeSource, request.body, "video link");
+    return tutor(() =>
+      addYoutubeSource(getDb(), actorOf(request), {
+        url: body.url,
+        title: body.title,
+        ownerMemberId: body.memberId,
+        subjectId: body.subjectId,
+      }),
+    );
+  });
+
+  app.post("/v1/learning/transcribe", { bodyLimit: MAX_AUDIO_BYTES }, async (request) => {
+    const mimeType = mimeOf(request);
+    if (!Buffer.isBuffer(request.body) || !AUDIO_TYPES.includes(mimeType)) {
+      throw new ApiError(415, "UNSUPPORTED_FILE", "That recording format is not supported.");
+    }
+    return tutor(() => transcribeSpeech(new Uint8Array(request.body as Buffer), mimeType));
   });
 
   app.get("/v1/learning/sources", async (request) => ({
@@ -147,8 +235,54 @@ export async function registerLearningRoutes(app: FastifyInstance) {
 
   app.post("/v1/learning/cards/:id/review", async (request) => {
     const { id } = parse(Id, request.params, "card");
-    const { grade } = parse(Review, request.body, "review");
-    return tutor(() => reviewCard(getDb(), actorOf(request), id, grade));
+    const { grade, reviewedAt, clientRef } = parse(Review, request.body, "review");
+    return tutor(() =>
+      reviewCard(getDb(), actorOf(request), id, grade, {
+        reviewedAt: reviewedAt ? new Date(reviewedAt) : undefined,
+        clientRef,
+      }),
+    );
+  });
+
+  app.post("/v1/learning/documents/:id/cheatsheets", async (request) => {
+    const { id } = parse(Id, request.params, "document");
+    return tutor(() => createCheatsheet(getDb(), actorOf(request), id));
+  });
+
+  app.get("/v1/learning/cheatsheets", async (request) => ({
+    cheatsheets: await tutor(() => listCheatsheets(getDb(), actorOf(request))),
+  }));
+
+  app.get("/v1/learning/cheatsheets/:id", async (request) => {
+    const { id } = parse(Id, request.params, "cheatsheet");
+    return tutor(() => getCheatsheet(getDb(), actorOf(request), id));
+  });
+
+  app.post("/v1/learning/documents/:id/interviews", async (request) => {
+    const { id } = parse(Id, request.params, "document");
+    const { count } = parse(InterviewRequest, request.body ?? {}, "interview request");
+    return tutor(() => startInterview(getDb(), actorOf(request), id, count));
+  });
+
+  app.get("/v1/learning/interviews", async (request) => ({
+    interviews: await tutor(() => listInterviews(getDb(), actorOf(request))),
+  }));
+
+  app.get("/v1/learning/interviews/:id", async (request) => {
+    const { id } = parse(Id, request.params, "interview");
+    return tutor(() => getInterview(getDb(), actorOf(request), id));
+  });
+
+  app.post("/v1/learning/interviews/:id/answers", async (request) => {
+    const { id } = parse(Id, request.params, "interview");
+    const { text } = parse(InterviewAnswer, request.body, "answer");
+    return tutor(() => answerInterview(getDb(), actorOf(request), id, text));
+  });
+
+  app.post("/v1/learning/interviews/:id/reveal", async (request) => {
+    const { id } = parse(Id, request.params, "interview");
+    const { questionId } = parse(RevealQuestion, request.body, "reveal");
+    return tutor(() => revealInterviewAnswer(getDb(), actorOf(request), id, questionId));
   });
 
   app.post("/v1/learning/documents/:id/quizzes", async (request) => {
@@ -198,5 +332,27 @@ export async function registerLearningRoutes(app: FastifyInstance) {
     const { id } = parse(Id, request.params, "member");
     const { name, nextExamDate } = parse(Subject, request.body, "subject");
     return tutor(() => addSubject(getDb(), actorOf(request), id, name, nextExamDate));
+  });
+
+  app.post("/v1/learning/subjects/:id", async (request) => {
+    const { id } = parse(Id, request.params, "subject");
+    const body = parse(SubjectUpdate, request.body, "subject");
+    return tutor(() => updateSubject(getDb(), actorOf(request), id, body));
+  });
+
+  app.delete("/v1/learning/subjects/:id", async (request) => {
+    const { id } = parse(Id, request.params, "subject");
+    return tutor(() => removeSubject(getDb(), actorOf(request), id));
+  });
+
+  app.post("/v1/learning/subjects/:id/classes", async (request) => {
+    const { id } = parse(Id, request.params, "subject");
+    const body = parse(ClassRequest, request.body, "class");
+    return tutor(() => addClass(getDb(), actorOf(request), id, body));
+  });
+
+  app.delete("/v1/learning/classes/:id", async (request) => {
+    const { id } = parse(Id, request.params, "class");
+    return tutor(() => removeClass(getDb(), actorOf(request), id));
   });
 }

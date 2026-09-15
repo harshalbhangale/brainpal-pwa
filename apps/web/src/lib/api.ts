@@ -76,7 +76,8 @@ async function request<T>(
   init: RequestInit = {},
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("content-type", "application/json");
+  // Only with a body: Fastify refuses an empty body that claims to be JSON (a DELETE, say).
+  if (init.body !== undefined) headers.set("content-type", "application/json");
 
   let response: Response;
   try {
@@ -111,6 +112,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body ?? {}),
     }),
+  del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
 export interface Me {
@@ -266,12 +268,16 @@ export function moneyCommand(command: string, payload: unknown): Promise<Command
   });
 }
 
+export type SourceKind = "pdf" | "image" | "youtube" | "text";
+
 export interface LearningSource {
   id: string;
   title: string;
-  kind: "pdf" | "image";
+  kind: SourceKind;
   status: "uploaded" | "ready" | "failed";
   errorCode: string | null;
+  subjectId: string | null;
+  sourceUrl: string | null;
   ownerMemberId: string;
   createdAt: string;
   documentId: string | null;
@@ -294,7 +300,8 @@ export interface LearningDocument {
   id: string;
   sourceId: string;
   title: string;
-  kind: "pdf" | "image";
+  kind: SourceKind;
+  sourceUrl: string | null;
   ownerMemberId: string;
   method: string;
   needsReview: number;
@@ -339,26 +346,110 @@ export interface LearningProgress {
   progress: Array<{ documentId: string; title: string; mastery: number; nextStep: NextStep; updatedAt: string }>;
 }
 
-/** The file is the request body, with its own content type; everything else in this module sends JSON. */
-export async function uploadLearningFile(file: File, title: string, memberId?: string): Promise<LearningDocument> {
-  const params = new URLSearchParams({ title });
-  if (memberId) params.set("memberId", memberId);
+export interface DeckSummary {
+  id: string;
+  title: string;
+  ownerMemberId: string;
+  documentId: string | null;
+  createdAt: string;
+  cardCount: number;
+  dueCount: number;
+}
+
+export interface Cheatsheet {
+  id: string;
+  title: string;
+  ownerMemberId: string;
+  documentId: string | null;
+  createdAt: string;
+  blocks: Array<{ heading: string; points: Array<{ text: string; sectionId: string | null; sourceRef: string | null }> }>;
+}
+
+export interface Interview {
+  id: string;
+  title: string;
+  status: "active" | "complete";
+  memberId: string;
+  documentId: string | null;
+  questionCount: number;
+  score: number;
+  currentQuestionId: string | null;
+  questions: Array<{
+    id: string;
+    prompt: string;
+    sectionId: string | null;
+    done: boolean;
+    replies: Array<{ text: string; correct: boolean; feedback: string; needsReview: boolean }>;
+    answer?: string;
+  }>;
+}
+
+export interface InterviewTurn extends Interview {
+  reply?: { questionId: string; correct: boolean; feedback: string; needsReview: boolean; tryAgain: boolean };
+  nextStep?: NextStep;
+  mastery?: number | null;
+}
+
+export interface InterviewSummary {
+  id: string;
+  title: string;
+  status: "active" | "complete";
+  memberId: string;
+  documentId: string | null;
+  score: number;
+  asked: number;
+  createdAt: string;
+}
+
+export interface ClassSession {
+  id: string;
+  subjectId: string;
+  weekday: number;
+  startsAt: string;
+  endsAt: string;
+  location: string | null;
+}
+
+export interface StudentProfile {
+  memberId: string;
+  schoolYear: string | null;
+  curriculum: string | null;
+  goals: string | null;
+  studyTimes: string | null;
+  subjects: Array<{ id: string; name: string; nextExamDate: string | null; classes: ClassSession[] }>;
+}
+
+/** A raw body with its own content type: a file or a recording. Everything else in this module sends JSON. */
+async function sendRaw<T>(path: string, body: Blob, type: string): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${BASE}/v1/learning/sources?${params.toString()}`, {
+    response = await fetch(`${BASE}${path}`, {
       method: "POST",
-      body: file,
+      body,
       credentials: "include",
-      headers: { "content-type": file.type || "application/octet-stream" },
+      headers: { "content-type": type || "application/octet-stream" },
     });
   } catch {
     throw new ApiError(0, "OFFLINE", "Cannot reach BrainPal right now.");
   }
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
-    throw new ApiError(response.status, body?.error?.code ?? "UNKNOWN", body?.error?.message ?? response.statusText);
+    const json = (await response.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+    throw new ApiError(response.status, json?.error?.code ?? "UNKNOWN", json?.error?.message ?? response.statusText);
   }
-  return (await response.json()) as LearningDocument;
+  return (await response.json()) as T;
+}
+
+export function uploadLearningFile(file: File, title: string, memberId?: string, subjectId?: string): Promise<LearningDocument> {
+  const params = new URLSearchParams({ title });
+  if (memberId) params.set("memberId", memberId);
+  if (subjectId) params.set("subjectId", subjectId);
+  return sendRaw<LearningDocument>(`/v1/learning/sources?${params.toString()}`, file, file.type);
+}
+
+/** Speech to text for a spoken answer. The recording is not kept. */
+export async function transcribeAudio(recording: Blob): Promise<string> {
+  const { text } = await sendRaw<{ text: string }>("/v1/learning/transcribe", recording, recording.type);
+  return text;
 }
 
 /** Server-sent events from POST /v1/agent/turn. */

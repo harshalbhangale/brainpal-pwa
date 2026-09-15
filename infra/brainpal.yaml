@@ -36,6 +36,9 @@ Parameters:
     Type: String
   ModelVision:
     Type: String
+  ModelTranscribe:
+    Type: String
+    Default: gpt-4o-mini-transcribe
 
 Conditions:
   HasImage: !Not [!Equals [!Ref ImageTag, ""]]
@@ -393,6 +396,7 @@ Resources:
             - { Name: MODEL_BALANCED, Value: !Ref ModelBalanced }
             - { Name: MODEL_REASONING, Value: !Ref ModelReasoning }
             - { Name: MODEL_VISION, Value: !Ref ModelVision }
+            - { Name: MODEL_TRANSCRIBE, Value: !Ref ModelTranscribe }
           Secrets:
             - Name: DB_USER
               ValueFrom: !Join ["", [!GetAtt Database.MasterUserSecret.SecretArn, ":username::"]]

@@ -1,4 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
+import type { TranscriptionModel } from "ai";
 
 /**
  * Models are addressed by the job they do, never by name. Routing and
@@ -49,6 +50,13 @@ export type BrainPalModel = ReturnType<ReturnType<typeof createOpenAI>>;
 
 export function modelFor(role: ModelRole): BrainPalModel {
   return getProvider()(modelNameFor(role));
+}
+
+/** Speech to text. Not one of the language roles: it is a different kind of model. */
+export function transcriptionModel(): TranscriptionModel {
+  const name = process.env["MODEL_TRANSCRIBE"];
+  if (!name) throw new Error("MODEL_TRANSCRIBE is not set; see .env.example.");
+  return getProvider().transcription(name);
 }
 
 /** True when the model layer is usable. Lets the API fall back rather than 500. */

@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "tsc && node --test test/*.test.ts"
+    "test": "tsc && node --test test/*.test.ts",
+    "eval": "tsc && node --env-file-if-exists=../../.env.local evals/run.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "~3.1131.0",
