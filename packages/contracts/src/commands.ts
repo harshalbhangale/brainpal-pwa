@@ -37,10 +37,61 @@ export const AvatarSelect = z.object({
   }),
 });
 
+/** Integer minor units (cents). $10,000 caps a single movement. */
+const AmountMinor = z.number().int().min(1).max(1_000_000);
+const Destination = z.enum(["spend", "save"]);
+
+export const WalletTopup = z.object({
+  command: z.literal("wallet.topup"),
+  payload: z.object({
+    amountMinor: AmountMinor,
+    title: z.string().min(1).max(200),
+  }),
+});
+
+export const MoneyTransfer = z.object({
+  command: z.literal("money.transfer"),
+  payload: z.object({
+    childMemberId: z.uuid(),
+    destination: Destination,
+    amountMinor: AmountMinor,
+    title: z.string().min(1).max(200),
+  }),
+});
+
+export const ChoreAssign = z.object({
+  command: z.literal("chore.assign"),
+  payload: z.object({
+    childMemberId: z.uuid(),
+    title: z.string().min(1).max(200),
+    detail: z.string().max(500).optional(),
+    rewardMinor: z.number().int().min(0).max(100_000),
+    destination: Destination,
+  }),
+});
+
+export const ChoreSubmit = z.object({
+  command: z.literal("chore.submit"),
+  payload: z.object({ choreId: z.uuid() }),
+});
+
+/** The money commands a client may send. `chore.pay` is not here: only the engine creates it. */
+export const MoneyCommand = z.discriminatedUnion("command", [
+  WalletTopup,
+  MoneyTransfer,
+  ChoreAssign,
+  ChoreSubmit,
+]);
+export type MoneyCommand = z.infer<typeof MoneyCommand>;
+
 export const CommandProposal = z.discriminatedUnion("command", [
   FamilyCreate,
   ChildAdd,
   AvatarSelect,
+  WalletTopup,
+  MoneyTransfer,
+  ChoreAssign,
+  ChoreSubmit,
 ]);
 export type CommandProposal = z.infer<typeof CommandProposal>;
 
@@ -48,5 +99,9 @@ export const CommandKind = z.enum([
   "family.create",
   "child.add",
   "avatar.select",
+  "wallet.topup",
+  "money.transfer",
+  "chore.assign",
+  "chore.submit",
 ]);
 export type CommandKind = z.infer<typeof CommandKind>;

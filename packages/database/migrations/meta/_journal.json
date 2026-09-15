@@ -29,6 +29,13 @@
       "when": 1789464118425,
       "tag": "0003_money_invariants",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789464504949,
+      "tag": "0004_money_commands",
+      "breakpoints": true
     }
   ]
 }

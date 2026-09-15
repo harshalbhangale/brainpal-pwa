@@ -3,6 +3,7 @@ import {
   bigint,
   check,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -22,6 +23,38 @@ export const accountPurpose = pgEnum("account_purpose", [
 ]);
 
 export const entryDirection = pgEnum("entry_direction", ["debit", "credit"]);
+
+export const choreStatus = pgEnum("chore_status", [
+  "open",
+  "submitted",
+  "redo",
+  "paid",
+  "cancelled",
+]);
+
+export const choreDestination = pgEnum("chore_destination", ["spend", "save"]);
+
+export const moneyCommandStatus = pgEnum("money_command_status", [
+  "executing",
+  "executed",
+  "approval_pending",
+  "rejected",
+]);
+
+export const approvalStatus = pgEnum("approval_status", [
+  "pending",
+  "approved",
+  "rejected",
+  "expired",
+]);
+
+/** What a parent sees on an approval card. Always derived server-side, never taken from a request. */
+export interface CommandDisplay {
+  title: string;
+  detail: string;
+  confirmLabel: string;
+  cancelLabel: string;
+}
 
 /**
  * A family has one wallet and one external-funding account; each child has a
@@ -55,6 +88,121 @@ export const moneyAccounts = pgTable(
   ],
 );
 
+/**
+ * Every consequential money request, whether it executed at once or is waiting
+ * on a parent. Idempotent per actor: the same key with the same payload replays
+ * the stored outcome; the same key with a different payload is refused.
+ */
+export const moneyCommands = pgTable(
+  "money_commands",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    actorMemberId: uuid("actor_member_id")
+      .notNull()
+      .references(() => familyMembers.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: moneyCommandStatus("status").notNull(),
+    display: jsonb("display").$type<CommandDisplay>(),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("money_commands_actor_key").on(
+      table.familyId,
+      table.actorMemberId,
+      table.idempotencyKey,
+    ),
+    index("money_commands_family_created_idx").on(table.familyId, table.createdAt),
+  ],
+);
+
+/**
+ * `commandHash` pins the approval to the exact payload the parent was shown. If
+ * the command changes afterwards, the hash no longer matches and approving it
+ * is refused.
+ */
+export const approvals = pgTable(
+  "approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    commandId: uuid("command_id")
+      .notNull()
+      .references(() => moneyCommands.id, { onDelete: "cascade" }),
+    commandHash: text("command_hash").notNull(),
+    status: approvalStatus("status").notNull().default("pending"),
+    requestedByMemberId: uuid("requested_by_member_id").references(
+      () => familyMembers.id,
+      { onDelete: "set null" },
+    ),
+    decidedByMemberId: uuid("decided_by_member_id").references(
+      () => familyMembers.id,
+      { onDelete: "set null" },
+    ),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("approvals_command_key").on(table.commandId),
+    index("approvals_family_status_idx").on(table.familyId, table.status),
+  ],
+);
+
+export const chores = pgTable(
+  "chores",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    familyId: uuid("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    assignedMemberId: uuid("assigned_member_id")
+      .notNull()
+      .references(() => familyMembers.id, { onDelete: "cascade" }),
+    createdByMemberId: uuid("created_by_member_id").references(
+      () => familyMembers.id,
+      { onDelete: "set null" },
+    ),
+    title: text("title").notNull(),
+    detail: text("detail"),
+    rewardMinor: integer("reward_minor").notNull(),
+    destination: choreDestination("destination").notNull().default("spend"),
+    status: choreStatus("status").notNull().default("open"),
+    redoNote: text("redo_note"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "chores_reward_range",
+      sql`${table.rewardMinor} >= 0 and ${table.rewardMinor} <= 100000`,
+    ),
+    index("chores_family_idx").on(table.familyId),
+    index("chores_assigned_idx").on(table.assignedMemberId),
+  ],
+);
+
 export const ledgerTransactions = pgTable(
   "ledger_transactions",
   {
@@ -64,7 +212,9 @@ export const ledgerTransactions = pgTable(
       .references(() => families.id, { onDelete: "cascade" }),
     kind: text("kind").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
-    commandId: uuid("command_id"),
+    commandId: uuid("command_id").references(() => moneyCommands.id, {
+      onDelete: "set null",
+    }),
     createdByMemberId: uuid("created_by_member_id").references(
       () => familyMembers.id,
       { onDelete: "set null" },

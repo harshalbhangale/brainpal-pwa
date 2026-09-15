@@ -18,6 +18,7 @@
     "test": "tsc && node --test test/*.test.ts"
   },
   "dependencies": {
+    "@brainpal/contracts": "workspace:*",
     "@brainpal/database": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },

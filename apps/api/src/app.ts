@@ -11,6 +11,7 @@ import { registerAgentRoutes } from "./routes/agent.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerFamilyRoutes } from "./routes/families.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import { registerMoneyRoutes } from "./routes/money.js";
 import {
   registerBootstrapRoutes,
   registerFamilyWriteRoutes,
@@ -46,7 +47,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(cors, {
     origin: allowedOrigins(),
     credentials: true,
-    allowedHeaders: ["content-type", "authorization", "x-request-id"],
+    allowedHeaders: ["content-type", "authorization", "x-request-id", "idempotency-key"],
   });
 
   await app.register(cookie);
@@ -120,6 +121,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await protectedScope.register(registerAgentRoutes);
     await protectedScope.register(registerFamilyRoutes);
     await protectedScope.register(registerFamilyWriteRoutes);
+    await protectedScope.register(registerMoneyRoutes);
     await protectedScope.register(registerPalRoutes);
     await protectedScope.register(registerThreadRoutes);
   });

@@ -1,12 +1,13 @@
-import { moneyAccounts } from "@brainpal/database";
+import { type Database, moneyAccounts } from "@brainpal/database";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { MoneyError } from "./errors.js";
 import type { Tx } from "./ledger.js";
 
+type Executor = Tx | Database;
 type Purpose = (typeof moneyAccounts.$inferSelect)["purpose"];
 
-export async function openFamilyAccounts(tx: Tx, familyId: string): Promise<void> {
+export async function openFamilyAccounts(tx: Executor, familyId: string): Promise<void> {
   await tx
     .insert(moneyAccounts)
     .values([
@@ -17,7 +18,7 @@ export async function openFamilyAccounts(tx: Tx, familyId: string): Promise<void
 }
 
 export async function openMemberAccounts(
-  tx: Tx,
+  tx: Executor,
   familyId: string,
   memberId: string,
 ): Promise<void> {
@@ -31,7 +32,7 @@ export async function openMemberAccounts(
 }
 
 export async function accountId(
-  tx: Tx,
+  tx: Executor,
   familyId: string,
   purpose: Purpose,
   ownerMemberId: string | null = null,

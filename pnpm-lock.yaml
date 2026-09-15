@@ -29,6 +29,9 @@ importers:
       '@brainpal/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@brainpal/moneypal':
+        specifier: workspace:*
+        version: link:../../packages/moneypal
       '@fastify/cookie':
         specifier: ^11.1.2
         version: 11.1.2
@@ -191,6 +194,9 @@ importers:
 
   packages/moneypal:
     dependencies:
+      '@brainpal/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@brainpal/database':
         specifier: workspace:*
         version: link:../database
