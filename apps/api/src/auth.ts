@@ -1,6 +1,7 @@
 import {
   AuthError,
   MockTokenVerifier,
+  SessionTokenVerifier,
   type Principal,
   type TokenVerifier,
   ensureUser,
@@ -10,6 +11,9 @@ import { getDb } from "@brainpal/database";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { ApiError } from "./errors.js";
+
+/** Name of the httpOnly cookie a browser session is carried in. */
+export const SESSION_COOKIE = "brainpal_session";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -27,18 +31,22 @@ export function buildVerifier(): TokenVerifier {
 
   if (mockEnabled) return new MockTokenVerifier();
 
-  throw new Error(
-    "No token verifier configured. Set MOCK_AUTH=true outside production, " +
-      "or wire the Cognito verifier.",
-  );
+  return new SessionTokenVerifier(getDb());
 }
 
+/**
+ * The session cookie is the primary path for the PWA; a bearer header is kept
+ * for tests and any non-browser caller. Checked in that order so a stray
+ * Authorization header never shadows a signed-in cookie.
+ */
 function bearer(request: FastifyRequest): string {
+  const cookieToken = request.cookies[SESSION_COOKIE];
+  if (cookieToken) return cookieToken;
+
   const header = request.headers.authorization;
-  if (!header?.startsWith("Bearer ")) {
-    throw new ApiError(401, "UNAUTHENTICATED", "missing bearer token");
-  }
-  return header.slice("Bearer ".length);
+  if (header?.startsWith("Bearer ")) return header.slice("Bearer ".length);
+
+  throw new ApiError(401, "UNAUTHENTICATED", "not signed in");
 }
 
 function toApiError(error: unknown): never {

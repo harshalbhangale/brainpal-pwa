@@ -125,3 +125,55 @@ export const joinCodes = pgTable(
     index("join_codes_member_idx").on(table.memberId),
   ],
 );
+
+/**
+ * A one-time email login code, consumed by POST /v1/auth/verify. Only the hash
+ * is stored, so a database read alone never yields a usable code — the same
+ * reasoning as `sessions.tokenHash` below.
+ */
+export const loginChallenges = pgTable(
+  "login_challenges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("login_challenges_email_idx").on(table.email)],
+);
+
+/**
+ * A signed-in device. The token itself is never stored — only its hash — so a
+ * database read alone never yields a usable session, matching the join-code
+ * shape above. Opaque rather than a JWT: `resolvePrincipal` already reads
+ * `family_members` on every request, so nothing needs to ride in the token,
+ * and revocation is then a plain row update instead of waiting out a TTL.
+ */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    deviceLabel: text("device_label"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("sessions_token_hash_key").on(table.tokenHash),
+    index("sessions_user_idx").on(table.userId),
+  ],
+);

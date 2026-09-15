@@ -8,7 +8,7 @@ import {
   ApiError,
   api,
   clearToken,
-  getToken,
+  hasSignedIn,
   streamTurn,
   type Family,
   type Me,
@@ -41,7 +41,7 @@ export default function Home() {
   const answerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!getToken()) {
+    if (!hasSignedIn()) {
       router.replace("/login");
       return;
     }
@@ -57,6 +57,11 @@ export default function Home() {
       } catch (err) {
         if (err instanceof ApiError && err.code === "NO_MEMBERSHIP") {
           router.replace("/onboarding");
+          return;
+        }
+        if (err instanceof ApiError && err.status === 401) {
+          clearToken();
+          router.replace("/login");
           return;
         }
         setLoadError(
@@ -132,6 +137,7 @@ export default function Home() {
         <button
           type="button"
           onClick={() => {
+            void api.post("/v1/auth/logout").catch(() => undefined);
             clearToken();
             router.replace("/login");
           }}

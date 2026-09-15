@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -7,6 +8,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { authenticate, buildVerifier, identify } from "./auth.js";
 import { ApiError, type ErrorEnvelope } from "./errors.js";
 import { registerAgentRoutes } from "./routes/agent.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerFamilyRoutes } from "./routes/families.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import {
@@ -46,6 +48,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     credentials: true,
     allowedHeaders: ["content-type", "authorization", "x-request-id"],
   });
+
+  await app.register(cookie);
 
   await app.register(rateLimit, {
     max: Number(process.env["RATE_LIMIT_MAX"] ?? 120),
@@ -100,6 +104,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Public. Registered before the auth hook so a health probe needs no token
   // and no database.
   await app.register(registerHealthRoutes);
+  await app.register(registerAuthRoutes);
 
   const verifier = buildVerifier();
 

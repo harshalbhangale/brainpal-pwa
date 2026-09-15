@@ -1,9 +1,14 @@
+import type { Database } from "@brainpal/database";
+
+import { authSubjectForUser } from "./principal.js";
+import { verifySessionToken } from "./session.js";
+
 /**
  * Turns a bearer token into an identity-provider subject. Nothing else: role
  * and family are never read from a token, only from `family_members`.
  *
- * Phase 1 ships the mock implementation so the agent loop can be built before
- * Cognito is wired. Swapping in the real verifier changes this file only.
+ * Phase 1 shipped a mock implementation so the agent loop could be built
+ * before real sign-in existed. `SessionTokenVerifier` below is the real one.
  */
 export interface TokenVerifier {
   verify(token: string): Promise<string>;
@@ -48,4 +53,21 @@ export class MockTokenVerifier implements TokenVerifier {
 
 export function mockToken(subject: string): string {
   return `${MOCK_PREFIX}${subject}`;
+}
+
+/**
+ * The production verifier: a session token (see `session.ts`) resolves to the
+ * user it belongs to, then to that user's authSubject, so it feeds the same
+ * `resolvePrincipal` call every other verifier does.
+ */
+export class SessionTokenVerifier implements TokenVerifier {
+  constructor(private readonly db: Database) {}
+
+  async verify(token: string): Promise<string> {
+    const session = await verifySessionToken(this.db, token);
+    if (!session) {
+      throw new AuthError("INVALID_TOKEN", "session is invalid or expired");
+    }
+    return authSubjectForUser(this.db, session.userId);
+  }
 }

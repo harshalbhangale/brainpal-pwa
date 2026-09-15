@@ -15,6 +15,9 @@ const withSerwist = withSerwistInit({
 
 const config: NextConfig = {
   transpilePackages: ["@brainpal/ui", "@brainpal/contracts"],
+  // The generated AGENTS.md/CLAUDE.md duplicate context this repo already
+  // states in its own docs, and regenerate noisily on every dev start.
+  agentRules: false,
 };
 
 export default withSerwist(config);

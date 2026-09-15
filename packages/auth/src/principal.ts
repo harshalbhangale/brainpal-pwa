@@ -53,6 +53,23 @@ export async function ensureUser(
   return raced.id;
 }
 
+/**
+ * The authSubject a session's userId maps back to, so a verified session can
+ * be handed to the same `resolvePrincipal` every other verifier feeds.
+ */
+export async function authSubjectForUser(
+  db: Database,
+  userId: string,
+): Promise<string> {
+  const [row] = await db
+    .select({ authSubject: users.authSubject })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!row) throw new AuthError("NO_USER", "session refers to a deleted user");
+  return row.authSubject;
+}
+
 export async function resolvePrincipal(
   db: Database,
   authSubject: string,

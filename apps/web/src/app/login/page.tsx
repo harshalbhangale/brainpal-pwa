@@ -3,51 +3,77 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { ApiError, api, setPendingName, setToken, type Me } from "@/lib/api";
+import { ApiError, api, markSignedIn, type Me } from "@/lib/api";
+
+type Stage = "start" | "code";
 
 /**
- * Phase 1 sign-in. Deliberately a mock: it mints a `mock:<subject>` token so
- * the agent loop could be built before Cognito. The API refuses these outside
- * development, and this whole screen is replaced — not extended — when real
- * sign-in lands.
+ * Parent sign-in is a magic-link code sent to email — proving the inbox is
+ * the authentication event, no password to manage or leak. A child never
+ * goes through this: they have no email, so joining mints the device its own
+ * session first (POST /v1/auth/device) and then redeems the code against it.
  */
 export default function Login() {
   const router = useRouter();
-  const [name, setName] = useState("");
+  const [stage, setStage] = useState<Stage>("start");
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function signIn(joinCode?: string) {
-    setBusy(true);
-    setError(null);
-
-    // Everything lives inside the try, including the token writes. Anything
-    // that throws out here would leave the button reading "One moment…"
-    // forever, with no error and no way back.
+  async function afterSignIn() {
+    markSignedIn();
     try {
-      const trimmed = name.trim();
-      const subject = `${trimmed.toLowerCase().replace(/\s+/g, "-") || "user"}-${crypto.randomUUID().slice(0, 8)}`;
-      setToken(`mock:${subject}`);
-      setPendingName(trimmed);
-
-      if (joinCode) {
-        await api.post("/v1/join", { code: joinCode.trim().toUpperCase() });
-        router.push("/home");
+      await api.get<Me>("/v1/me");
+      router.push("/home");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "NO_MEMBERSHIP") {
+        router.push("/onboarding");
         return;
       }
+      throw err;
+    }
+  }
 
-      // An existing membership goes straight home; a new one onboards.
-      try {
-        await api.get<Me>("/v1/me");
-        router.push("/home");
-      } catch (err) {
-        if (err instanceof ApiError && err.code === "NO_MEMBERSHIP") {
-          router.push("/onboarding");
-          return;
-        }
-        throw err;
-      }
+  async function sendCode() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post("/v1/auth/request-code", { email: email.trim() });
+      setStage("code");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyCode() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post("/v1/auth/verify", { email: email.trim(), code: otp.trim() });
+      await afterSignIn();
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.code === "INVALID_CODE"
+            ? "That code is wrong or has expired."
+            : err.message
+          : "Something went wrong.",
+      );
+      setBusy(false);
+    }
+  }
+
+  async function joinWithCode() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post("/v1/auth/device");
+      await api.post("/v1/join", { code: code.trim().toUpperCase() });
+      await afterSignIn();
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -64,31 +90,65 @@ export default function Login() {
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-8 px-6 py-12">
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">BrainPal</h1>
-        <p className="text-muted">
-          One app where your PALs work together.
-        </p>
+        <p className="text-muted">One app where your PALs work together.</p>
       </header>
 
       <section className="space-y-4 rounded-2xl bg-card p-6 shadow-sm">
-        <label className="block space-y-2">
-          <span className="text-sm font-medium">Your name</span>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Harshal"
-            autoComplete="given-name"
-            className="w-full rounded-xl border border-line bg-ground px-4 py-3 outline-none focus:border-accent"
-          />
-        </label>
-
-        <button
-          type="button"
-          onClick={() => void signIn()}
-          disabled={busy}
-          className="w-full rounded-xl bg-accent px-4 py-3 font-medium text-white disabled:opacity-50"
-        >
-          {busy ? "One moment…" : "Start as a parent"}
-        </button>
+        {stage === "start" ? (
+          <>
+            <label className="block space-y-2">
+              <span className="text-sm font-medium">Your email</span>
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                type="email"
+                autoComplete="email"
+                className="w-full rounded-xl border border-line bg-ground px-4 py-3 outline-none focus:border-accent"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void sendCode()}
+              disabled={busy || !email.includes("@")}
+              className="w-full rounded-xl bg-accent px-4 py-3 font-medium text-white disabled:opacity-50"
+            >
+              {busy ? "One moment…" : "Send me a code"}
+            </button>
+          </>
+        ) : (
+          <>
+            <label className="block space-y-2">
+              <span className="text-sm text-muted">
+                Enter the 6-digit code sent to {email}
+              </span>
+              <input
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                placeholder="123456"
+                inputMode="numeric"
+                maxLength={6}
+                autoComplete="one-time-code"
+                className="w-full rounded-xl border border-line bg-ground px-4 py-3 font-mono tracking-[0.3em] outline-none focus:border-accent"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void verifyCode()}
+              disabled={busy || otp.length !== 6}
+              className="w-full rounded-xl bg-accent px-4 py-3 font-medium text-white disabled:opacity-50"
+            >
+              {busy ? "One moment…" : "Sign in"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStage("start")}
+              className="w-full text-sm text-muted underline underline-offset-4"
+            >
+              Use a different email
+            </button>
+          </>
+        )}
       </section>
 
       <section className="space-y-4 rounded-2xl bg-card p-6 shadow-sm">
@@ -107,7 +167,7 @@ export default function Login() {
         </label>
         <button
           type="button"
-          onClick={() => void signIn(code)}
+          onClick={() => void joinWithCode()}
           disabled={busy || code.trim().length < 4}
           className="w-full rounded-xl border border-line px-4 py-3 font-medium disabled:opacity-40"
         >

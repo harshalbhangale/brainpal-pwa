@@ -12,14 +12,15 @@
   },
   "dependencies": {
     "@brainpal/auth": "workspace:*",
+    "@brainpal/brainpal": "workspace:*",
     "@brainpal/contracts": "workspace:*",
     "@brainpal/database": "workspace:*",
+    "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^11.2.0",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.4",
-    "zod": "^4.6.5",
-    "@brainpal/brainpal": "workspace:*"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
