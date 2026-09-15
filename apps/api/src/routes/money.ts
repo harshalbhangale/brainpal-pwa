@@ -2,9 +2,15 @@ import { MoneyCommand } from "@brainpal/contracts";
 import { getDb } from "@brainpal/database";
 import {
   MoneyError,
+  allowancesFor,
+  cardsFor,
   choresFor,
   decideApproval,
+  goalsFor,
+  historyFor,
   pendingApprovals,
+  receiptFor,
+  requestsFor,
   submitCommand,
   walletFor,
 } from "@brainpal/moneypal";
@@ -15,14 +21,21 @@ import { ApiError } from "../errors.js";
 
 const STATUS: Record<string, number> = {
   CHILD_CANNOT_MOVE_MONEY: 403,
+  CHILD_CANNOT_UNFREEZE: 403,
+  CHILD_ONLY: 403,
+  CROSS_MEMBER_FORBIDDEN: 403,
   PARENT_ONLY: 403,
   CHORE_NOT_YOURS: 403,
   CHILD_NOT_FOUND: 404,
   CHORE_NOT_FOUND: 404,
   APPROVAL_NOT_FOUND: 404,
+  ALLOWANCE_NOT_FOUND: 404,
+  TRANSACTION_NOT_FOUND: 404,
   LEDGER_AMOUNT_INVALID: 400,
   INVALID_NUMBER: 400,
   INVALID_PAYLOAD: 400,
+  INVALID_TIMEZONE: 400,
+  PROVIDER_FAILED: 502,
 };
 
 async function money<T>(fn: () => Promise<T>): Promise<T> {
@@ -45,6 +58,13 @@ const actorOf = (request: FastifyRequest) => ({
 const Decision = z.object({
   decision: z.enum(["approve", "reject"]),
   note: z.string().max(500).optional(),
+});
+
+const HistoryQuery = z.object({
+  kind: z.string().max(40).optional(),
+  q: z.string().max(100).optional(),
+  memberId: z.uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 
 export async function registerMoneyRoutes(app: FastifyInstance) {
@@ -81,4 +101,34 @@ export async function registerMoneyRoutes(app: FastifyInstance) {
   app.get("/v1/money/approvals", async (request) => ({
     approvals: await money(() => pendingApprovals(getDb(), actorOf(request))),
   }));
+
+  app.get("/v1/money/goals", async (request) => ({
+    goals: await money(() => goalsFor(getDb(), actorOf(request))),
+  }));
+
+  app.get("/v1/money/allowances", async (request) => ({
+    allowances: await money(() => allowancesFor(getDb(), actorOf(request))),
+  }));
+
+  app.get("/v1/money/cards", async (request) => ({
+    cards: await money(() => cardsFor(getDb(), actorOf(request))),
+  }));
+
+  app.get("/v1/money/requests", async (request) => ({
+    requests: await money(() => requestsFor(getDb(), actorOf(request))),
+  }));
+
+  app.get("/v1/money/history", async (request) => {
+    const query = HistoryQuery.safeParse(request.query);
+    if (!query.success) {
+      throw new ApiError(400, "INVALID_REQUEST", "bad history query", { issues: query.error.issues });
+    }
+    return money(() => historyFor(getDb(), actorOf(request), query.data));
+  });
+
+  app.get("/v1/money/receipts/:id", async (request) => {
+    const params = z.object({ id: z.uuid() }).safeParse(request.params);
+    if (!params.success) throw new ApiError(404, "TRANSACTION_NOT_FOUND", "that receipt was not found");
+    return money(() => receiptFor(getDb(), actorOf(request), params.data.id));
+  });
 }

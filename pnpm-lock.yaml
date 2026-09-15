@@ -110,6 +110,25 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  apps/worker:
+    dependencies:
+      '@brainpal/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@brainpal/moneypal':
+        specifier: workspace:*
+        version: link:../../packages/moneypal
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.2
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/auth:
     dependencies:
       '@brainpal/contracts':
