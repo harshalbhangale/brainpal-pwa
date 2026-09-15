@@ -22,8 +22,11 @@ const fakeAi: TutorAi = {
     { heading: null, text: "9 x 6 = 5?", confidence: 0.5, uncertainParts: ["5?"], sourceRef },
     { heading: "Area", text: "A 3 by 4 rectangle has area 12", confidence: 0.95, uncertainParts: [], sourceRef },
   ],
-  makeFlashcards: async (sections) =>
-    sections.map((s) => ({ front: `Recall: ${s.heading ?? "fact"}`, back: s.text, sectionId: s.id })),
+  // The last card rewords the first: the same section and answer, so it must be dropped.
+  makeFlashcards: async (sections) => [
+    ...sections.map((s) => ({ front: `Recall: ${s.heading ?? "fact"}`, back: s.text, sectionId: s.id })),
+    { front: "And again, the first one?", back: sections[0]!.text, sectionId: sections[0]!.id },
+  ],
   makeQuiz: async (sections) => {
     const [times, nines, area] = sections;
     const mcq = (prompt: string, answer: string, options: string[], sectionId: string) => ({

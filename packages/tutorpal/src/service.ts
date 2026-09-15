@@ -295,7 +295,16 @@ async function groundedSections(db: Database, actor: Actor, documentId: string) 
 
 export async function createDeck(db: Database, actor: Actor, documentId: string, count = 10) {
   const { source, sections } = await groundedSections(db, actor, documentId);
-  const cards = await tutorAi().makeFlashcards(sections, clamp(count, 1, 30));
+  const generated = await tutorAi().makeFlashcards(sections, clamp(count, 1, 30));
+  // Asked for more cards than the material has facts, a model pads with rewordings of the
+  // same card. One card per fact: the same section with the same answer is a repeat.
+  const seen = new Set<string>();
+  const cards = generated.filter((c) => {
+    const key = `${c.sectionId}|${normalise(c.back)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   if (cards.length === 0) throw new TutorError("NOTHING_GENERATED", "TutorPAL could not make flashcards from this material.");
 
   const deckId = await db.transaction(async (tx) => {

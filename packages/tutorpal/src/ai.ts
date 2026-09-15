@@ -123,7 +123,7 @@ export class OpenAiTutor implements TutorAi {
       model: modelFor("balanced"),
       schema: Cards,
       system: `You write flashcards for a child from their own learning material. One idea per card: a short question or prompt on the front, the answer briefly on the back.\n${GROUNDING}`,
-      prompt: `${numbered(sections)}\n\nWrite ${count} flashcards.`,
+      prompt: `${numbered(sections)}\n\nWrite up to ${count} flashcards. Never write two cards for the same fact: fewer cards are better than repeats.`,
     });
     return object.cards
       .map((c) => ({ front: c.front.trim(), back: c.back.trim(), sectionId: sectionIdAt(sections, c.section) }))
