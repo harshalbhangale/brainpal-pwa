@@ -177,6 +177,68 @@ export interface Approval {
   expiresAt: string;
 }
 
+export interface Goal {
+  id: string;
+  ownerMemberId: string;
+  ownerName: string;
+  title: string;
+  targetMinor: number;
+  targetDate: string | null;
+  savedMinor: number;
+  achieved: boolean;
+  weeklyPathMinor: number | null;
+}
+
+export interface Allowance {
+  id: string;
+  childMemberId: string;
+  childName: string;
+  amountMinor: number;
+  spendBasisPoints: number;
+  weekday: number;
+  timeZone: string;
+  status: "active" | "paused";
+  nextRunAt: string;
+  lastRun: { periodKey: string; status: "succeeded" | "failed"; errorCode: string | null; attempts: number } | null;
+}
+
+export interface CardState {
+  memberId: string;
+  displayName: string;
+  frozen: boolean;
+  dailyLimitMinor: number;
+  online: boolean;
+  atm: boolean;
+  inApp: boolean;
+  provider: string;
+}
+
+export interface SpendRequestRow {
+  id: string;
+  requesterMemberId: string;
+  title: string;
+  reason: string | null;
+  amountMinor: number;
+  status: "pending" | "approved" | "declined";
+  createdAt: string;
+}
+
+export interface HistoryItem {
+  transactionId: string;
+  kind: string;
+  title: string;
+  createdAt: string;
+  amountMinor: number;
+  netMinor: number;
+  lines: Array<{ account: string; direction: "debit" | "credit"; amountMinor: number }>;
+}
+
+export interface History {
+  items: HistoryItem[];
+  pending: Array<{ requestId: string; memberId: string; title: string; amountMinor: number }>;
+  failed: Array<{ periodKey: string; memberId: string; amountMinor: number; errorCode: string | null; attempts: number }>;
+}
+
 export interface CommandOutcome {
   commandId: string;
   status: string;
