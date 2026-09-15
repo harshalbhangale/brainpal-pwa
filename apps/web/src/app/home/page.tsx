@@ -138,6 +138,9 @@ export default function Home() {
         <a href="/money" className="text-sm font-medium text-money underline underline-offset-4">
           Money
         </a>
+        <a href="/learn" className="text-sm font-medium text-tutor underline underline-offset-4">
+          Learn
+        </a>
         <button
           type="button"
           onClick={() => {

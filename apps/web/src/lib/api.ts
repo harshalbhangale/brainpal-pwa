@@ -266,6 +266,101 @@ export function moneyCommand(command: string, payload: unknown): Promise<Command
   });
 }
 
+export interface LearningSource {
+  id: string;
+  title: string;
+  kind: "pdf" | "image";
+  status: "uploaded" | "ready" | "failed";
+  errorCode: string | null;
+  ownerMemberId: string;
+  createdAt: string;
+  documentId: string | null;
+}
+
+export interface LearningSection {
+  id: string;
+  position: number;
+  heading: string | null;
+  text: string;
+  originalText: string;
+  corrected: boolean;
+  confidence: number;
+  needsReview: boolean;
+  uncertainParts: string[];
+  sourceRef: string;
+}
+
+export interface LearningDocument {
+  id: string;
+  sourceId: string;
+  title: string;
+  kind: "pdf" | "image";
+  ownerMemberId: string;
+  method: string;
+  needsReview: number;
+  sections: LearningSection[];
+}
+
+export interface Deck {
+  id: string;
+  title: string;
+  ownerMemberId: string;
+  documentId: string | null;
+  dueCount: number;
+  cards: Array<{ id: string; front: string; back: string; sectionId: string | null; state: string; intervalDays: number; dueAt: string }>;
+}
+
+export interface QuizView {
+  id: string;
+  title: string;
+  difficulty: string;
+  ownerMemberId: string;
+  documentId: string | null;
+  questions: Array<{ id: string; type: "mcq" | "short"; prompt: string; options?: string[] }>;
+}
+
+export interface NextStep {
+  activity: "review_flashcards" | "retry_quiz" | "harder_quiz";
+  reason: string;
+  sectionIds: string[];
+}
+
+export interface AttemptResult {
+  attemptId: string;
+  score: number;
+  total: number;
+  mastery: number | null;
+  nextStep: NextStep;
+  results: Array<{ questionId: string; correct: boolean; feedback: string; needsReview: boolean; correctAnswer?: string }>;
+}
+
+export interface LearningProgress {
+  memberId: string;
+  progress: Array<{ documentId: string; title: string; mastery: number; nextStep: NextStep; updatedAt: string }>;
+}
+
+/** The file is the request body, with its own content type; everything else in this module sends JSON. */
+export async function uploadLearningFile(file: File, title: string, memberId?: string): Promise<LearningDocument> {
+  const params = new URLSearchParams({ title });
+  if (memberId) params.set("memberId", memberId);
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}/v1/learning/sources?${params.toString()}`, {
+      method: "POST",
+      body: file,
+      credentials: "include",
+      headers: { "content-type": file.type || "application/octet-stream" },
+    });
+  } catch {
+    throw new ApiError(0, "OFFLINE", "Cannot reach BrainPal right now.");
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+    throw new ApiError(response.status, body?.error?.code ?? "UNKNOWN", body?.error?.message ?? response.statusText);
+  }
+  return (await response.json()) as LearningDocument;
+}
+
 /** Server-sent events from POST /v1/agent/turn. */
 export type TurnEvent =
   | { type: "routed"; ownerPal: string; intent: string; confidence: number; threadId?: string }

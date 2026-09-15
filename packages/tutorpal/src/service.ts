@@ -431,7 +431,8 @@ export async function createQuiz(
   const { source, sections } = await groundedSections(db, actor, documentId);
   const count = clamp(opts.count ?? 5, 1, 15);
   const difficulty = opts.difficulty ?? "medium";
-  const generated = await tutorAi().makeQuiz(sections, count, difficulty);
+  // Questions that fail validation are dropped, so ask for a couple spare and keep the first `count`.
+  const generated = await tutorAi().makeQuiz(sections, count + 2, difficulty);
 
   const questions: QuizQuestion[] = generated.slice(0, count).map((q) => ({
     id: randomUUID(),
