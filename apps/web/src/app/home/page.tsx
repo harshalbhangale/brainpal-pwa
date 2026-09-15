@@ -66,8 +66,14 @@ export default function Home() {
     })();
   }, [router]);
 
-  async function ask() {
-    const question = text.trim();
+  /**
+   * `raw` comes from the input element when sending by keyboard. Reading state
+   * instead would use the value as of the last render, which a fast typist can
+   * beat — the keypress lands before React re-renders and the message is sent
+   * short, or silently not at all.
+   */
+  async function ask(raw?: string) {
+    const question = (raw ?? text).trim();
     if (!question || busy) return;
 
     setText("");
@@ -203,7 +209,11 @@ export default function Home() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") void ask();
+            // isComposing: while typing Japanese, Chinese or Korean, Enter
+            // confirms the character being composed. Sending on it would cut
+            // the message off mid-word.
+            if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+            void ask(e.currentTarget.value);
           }}
           placeholder="How can Maya save for a bike?"
           className="flex-1 rounded-xl border border-line bg-card px-4 py-3 outline-none focus:border-accent"
