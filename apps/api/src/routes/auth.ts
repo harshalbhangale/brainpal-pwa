@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   AuthError,
-  ConsoleEmailSender,
-  type EmailSender,
+  type CreatedSession,
   createSession,
   ensureUser,
   requestLoginCode,
@@ -12,10 +11,12 @@ import {
   verifySessionToken,
 } from "@brainpal/auth";
 import { getDb } from "@brainpal/database";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { z } from "zod";
 
 import { SESSION_COOKIE } from "../auth.js";
+import { buildEmailSender } from "../email.js";
 import { ApiError } from "../errors.js";
 
 const RequestCode = z.object({ email: z.email() });
@@ -23,26 +24,45 @@ const VerifyCode = z.object({
   email: z.email(),
   code: z.string().length(6),
 });
+const GoogleCredential = z.object({ credential: z.string().min(20).max(4096) });
 
 const isProduction = process.env["NODE_ENV"] === "production";
+const GOOGLE_KEYS = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"));
+
+function setSessionCookie(reply: FastifyReply, session: CreatedSession): void {
+  reply.setCookie(SESSION_COOKIE, session.token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: "lax",
+    path: "/",
+    expires: session.expiresAt,
+  });
+}
 
 /**
- * Magic-link sign-in for parents. Unauthenticated by design — proving an
- * email inbox is the authentication event. Children never use this: they are
- * provisioned by a parent and sign in by redeeming a join code instead.
+ * Parent sign-in: Google, or a 6-digit code emailed to them. Both prove an
+ * email address and land on the same account, keyed by that address.
+ * Children never use either: a parent provisions them and they join by code.
  */
 export async function registerAuthRoutes(app: FastifyInstance) {
-  const sender: EmailSender = new ConsoleEmailSender();
+  const sender = buildEmailSender();
 
   app.post("/v1/auth/request-code", async (request, reply) => {
     const parsed = RequestCode.safeParse(request.body);
     if (!parsed.success) {
       throw new ApiError(400, "INVALID_REQUEST", "a valid email is required");
     }
-
-    // Always 204, whether or not the address has an account: this endpoint
-    // must never be usable to test which emails are registered.
-    await requestLoginCode(getDb(), sender, parsed.data.email);
+    try {
+      // 204 whether or not the address has an account: this endpoint must
+      // never be usable to test which emails are registered.
+      await requestLoginCode(getDb(), sender, parsed.data.email);
+    } catch (error) {
+      if (error instanceof AuthError && error.code === "TOO_MANY_REQUESTS") {
+        throw new ApiError(429, error.code, "Too many codes asked for. Try again in a few minutes.");
+      }
+      request.log.error({ err: error }, "login code could not be sent");
+      throw new ApiError(502, "EMAIL_FAILED", "We could not send the code. Try again in a moment.");
+    }
     return reply.status(204).send();
   });
 
@@ -57,49 +77,51 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     try {
       email = await verifyLoginCode(db, parsed.data.email, parsed.data.code);
     } catch (error) {
-      if (error instanceof AuthError) {
-        throw new ApiError(401, error.code, error.message);
-      }
+      if (error instanceof AuthError) throw new ApiError(401, error.code, error.message);
       throw error;
     }
 
-    // The email itself is the authSubject: stable, unique, and it lets a
-    // session resolve back to the same `resolvePrincipal` every other
-    // verifier feeds, with no separate identity-provider concept needed.
     const userId = await ensureUser(db, email);
-    const session = await createSession(db, userId, request.headers["user-agent"]);
+    setSessionCookie(reply, await createSession(db, userId, request.headers["user-agent"]));
+    return { ok: true };
+  });
 
-    reply.setCookie(SESSION_COOKIE, session.token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: "lax",
-      path: "/",
-      expires: session.expiresAt,
-    });
+  app.post("/v1/auth/google", async (request, reply) => {
+    const clientId = process.env["GOOGLE_CLIENT_ID"];
+    if (!clientId) throw new ApiError(503, "GOOGLE_NOT_CONFIGURED", "Google sign-in is not set up yet.");
 
+    const parsed = GoogleCredential.safeParse(request.body);
+    if (!parsed.success) throw new ApiError(400, "INVALID_REQUEST", "a Google credential is required");
+
+    let payload: Record<string, unknown>;
+    try {
+      ({ payload } = await jwtVerify(parsed.data.credential, GOOGLE_KEYS, {
+        issuer: ["https://accounts.google.com", "accounts.google.com"],
+        audience: clientId,
+      }));
+    } catch {
+      throw new ApiError(401, "INVALID_GOOGLE_TOKEN", "Google sign-in could not be verified.");
+    }
+    if (payload["email_verified"] !== true || typeof payload["email"] !== "string") {
+      throw new ApiError(401, "EMAIL_NOT_VERIFIED", "That Google account has no verified email.");
+    }
+
+    // The same key as the email-code path, so either sign-in reaches one account.
+    const db = getDb();
+    const userId = await ensureUser(db, payload["email"].toLowerCase());
+    setSessionCookie(reply, await createSession(db, userId, request.headers["user-agent"]));
     return { ok: true };
   });
 
   /**
-   * A child never has an email or a password — a parent provisions them and
-   * hands over a join code. This mints the device its own identity server
-   * side (an opaque authSubject the child never sees or types) so the code
-   * redemption below it has a session to attach to. No IdP is involved.
+   * A child never has an email or a password. This mints the device its own
+   * identity server side, so the join-code redemption has a session to attach
+   * to. No identity provider is involved.
    */
   app.post("/v1/auth/device", async (_request, reply) => {
     const db = getDb();
-    const authSubject = `device:${randomUUID()}`;
-    const userId = await ensureUser(db, authSubject);
-    const session = await createSession(db, userId, "device");
-
-    reply.setCookie(SESSION_COOKIE, session.token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: "lax",
-      path: "/",
-      expires: session.expiresAt,
-    });
-
+    const userId = await ensureUser(db, `device:${randomUUID()}`);
+    setSessionCookie(reply, await createSession(db, userId, "device"));
     return { ok: true };
   });
 

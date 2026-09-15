@@ -1,11 +1,63 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ApiError, api, markSignedIn, type Me } from "@/lib/api";
 
 type Stage = "start" | "code";
+
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize(options: { client_id: string; callback: (response: { credential: string }) => void }): void;
+          renderButton(element: HTMLElement, options: Record<string, unknown>): void;
+        };
+      };
+    };
+  }
+}
+
+/** Google's own button. Renders nothing until a client id is configured. */
+function GoogleButton({ onCredential }: { onCredential: (credential: string) => void }) {
+  const container = useRef<HTMLDivElement>(null);
+  const handler = useRef(onCredential);
+  handler.current = onCredential;
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
+    const render = () => {
+      if (!window.google || !container.current) return;
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: (response) => handler.current(response.credential),
+      });
+      window.google.accounts.id.renderButton(container.current, {
+        theme: "outline",
+        size: "large",
+        shape: "pill",
+        text: "continue_with",
+        width: 320,
+      });
+    };
+    if (window.google) {
+      render();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.onload = render;
+    document.head.appendChild(script);
+  }, []);
+
+  if (!GOOGLE_CLIENT_ID) return null;
+  return <div ref={container} className="flex min-h-11 justify-center" />;
+}
 
 /**
  * Parent sign-in is a magic-link code sent to email — proving the inbox is
@@ -67,6 +119,18 @@ export default function Login() {
     }
   }
 
+  async function googleSignIn(credential: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post("/v1/auth/google", { credential });
+      await afterSignIn();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Google sign-in did not work.");
+      setBusy(false);
+    }
+  }
+
   async function joinWithCode() {
     setBusy(true);
     setError(null);
@@ -96,6 +160,12 @@ export default function Login() {
       <section className="space-y-4 rounded-2xl bg-card p-6 shadow-sm">
         {stage === "start" ? (
           <>
+            {GOOGLE_CLIENT_ID ? (
+              <>
+                <GoogleButton onCredential={(credential) => void googleSignIn(credential)} />
+                <p className="text-center text-xs text-muted">or use your email</p>
+              </>
+            ) : null}
             <label className="block space-y-2">
               <span className="text-sm font-medium">Your email</span>
               <input

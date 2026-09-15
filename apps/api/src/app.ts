@@ -35,6 +35,9 @@ export function allowedOrigins(): string[] {
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
+    // Behind the load balancer every request would otherwise share its IP,
+    // and one rate-limit bucket. Only trusted when explicitly deployed behind it.
+    trustProxy: process.env["TRUST_PROXY"] === "true",
     logger: {
       level: process.env["LOG_LEVEL"] ?? "info",
       // Never log tokens or child conversation content.

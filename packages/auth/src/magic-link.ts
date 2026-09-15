@@ -1,13 +1,15 @@
 import { randomInt, createHash, timingSafeEqual } from "node:crypto";
 
 import { type Database, loginChallenges } from "@brainpal/database";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 
 import { AuthError } from "./verifier.js";
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_ATTEMPTS = 5;
 const CODE_DIGITS = 6;
+const CODE_WINDOW_MS = 15 * 60 * 1000;
+const MAX_CODES_PER_WINDOW = 5;
 
 /** Sends the login code to the parent. Swap for a real provider in production. */
 export interface EmailSender {
@@ -41,6 +43,21 @@ export async function requestLoginCode(
   email: string,
 ): Promise<void> {
   const normalised = email.trim().toLowerCase();
+
+  // Every code is a real email we pay for and someone receives, so cap them per address.
+  const [recent] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(loginChallenges)
+    .where(
+      and(
+        eq(loginChallenges.email, normalised),
+        gte(loginChallenges.createdAt, new Date(Date.now() - CODE_WINDOW_MS)),
+      ),
+    );
+  if ((recent?.n ?? 0) >= MAX_CODES_PER_WINDOW) {
+    throw new AuthError("TOO_MANY_REQUESTS", "too many codes requested");
+  }
+
   const code = generateCode();
 
   await db.insert(loginChallenges).values({
