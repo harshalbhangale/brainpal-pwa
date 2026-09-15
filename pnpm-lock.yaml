@@ -189,6 +189,22 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  packages/moneypal:
+    dependencies:
+      '@brainpal/database':
+        specifier: workspace:*
+        version: link:../database
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.2
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/ui:
     dependencies:
       '@brainpal/contracts':
