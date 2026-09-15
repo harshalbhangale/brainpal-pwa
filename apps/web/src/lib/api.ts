@@ -154,6 +154,49 @@ export interface ThreadSummary {
   updatedAt: string;
 }
 
+export interface Wallet {
+  familyWalletMinor?: number;
+  children: Array<{ memberId: string; displayName: string; spendMinor: number; saveMinor: number }>;
+}
+
+export interface Chore {
+  id: string;
+  assignedMemberId: string;
+  title: string;
+  detail: string | null;
+  rewardMinor: number;
+  destination: "spend" | "save";
+  status: "open" | "submitted" | "redo" | "paid" | "cancelled";
+  redoNote: string | null;
+}
+
+export interface Approval {
+  id: string;
+  kind: string;
+  display: { title: string; detail: string; confirmLabel: string; cancelLabel: string } | null;
+  expiresAt: string;
+}
+
+export interface CommandOutcome {
+  commandId: string;
+  status: string;
+  replayed: boolean;
+  result: Record<string, unknown> | null;
+}
+
+/**
+ * One key per user action. The button is disabled while the request is in
+ * flight, so a double-tap cannot send a second key; a network retry of the
+ * same fetch would replay rather than run twice.
+ */
+export function moneyCommand(command: string, payload: unknown): Promise<CommandOutcome> {
+  return request<CommandOutcome>("/v1/money/commands", {
+    method: "POST",
+    body: JSON.stringify({ command, payload }),
+    headers: { "idempotency-key": crypto.randomUUID() },
+  });
+}
+
 /** Server-sent events from POST /v1/agent/turn. */
 export type TurnEvent =
   | { type: "routed"; ownerPal: string; intent: string; confidence: number; threadId?: string }

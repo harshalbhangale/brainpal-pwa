@@ -3,6 +3,7 @@ import { after, before, describe, test } from "node:test";
 
 import { mockToken } from "@brainpal/auth";
 import { closePool, families, getDb, seedPalRegistry } from "@brainpal/database";
+import { ledgerFacts } from "@brainpal/moneypal";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 
@@ -19,6 +20,7 @@ describe("money: the chore loop", { skip: !hasDatabase }, () => {
   const parent = mockToken(`test-${crypto.randomUUID()}`);
   const maya = mockToken(`test-${crypto.randomUUID()}`);
   let mayaId = "";
+  let parentId = "";
   let choreId = "";
   let approvalId = "";
 
@@ -49,6 +51,7 @@ describe("money: the chore loop", { skip: !hasDatabase }, () => {
       currency: "AUD",
     });
     familyId = family.json().familyId;
+    parentId = family.json().memberId;
 
     const child = await call("POST", "/v1/families/current/children", parent, { displayName: "Maya" });
     mayaId = child.json().member.id;
@@ -211,5 +214,17 @@ describe("money: the chore loop", { skip: !hasDatabase }, () => {
     assert.equal(chore.status, "redo");
     assert.equal(chore.redoNote, "The bowl is still empty");
     assert.equal((await wallet(parent)).children[0].spendMinor, spendBefore);
+  });
+
+  test("MoneyPAL's facts come from the ledger, scoped to who is asking", async () => {
+    const mine = await ledgerFacts(db, { memberId: mayaId, familyId, role: "child" });
+    assert.match(mine, /Maya: Spend \$5\.00/);
+    assert.match(mine, /"Feed the cat" for Maya: \$1\.00 to Spend, sent back for another go/);
+    assert.doesNotMatch(mine, /Family wallet/, "a child's facts never include the family wallet");
+    assert.doesNotMatch(mine, /approval/, "nor the parent's approval queue");
+
+    const theirs = await ledgerFacts(db, { memberId: parentId, familyId, role: "parent" });
+    assert.match(theirs, /Family wallet: \$\d+\.\d{2}\./);
+    assert.match(theirs, /No approvals are waiting\./);
   });
 });

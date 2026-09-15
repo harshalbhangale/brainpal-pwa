@@ -134,6 +134,10 @@ export default function Home() {
             Hello{me ? `, ${me.displayName}` : ""}
           </h1>
         </div>
+        <div className="flex items-center gap-4">
+        <a href="/money" className="text-sm font-medium text-money underline underline-offset-4">
+          Money
+        </a>
         <button
           type="button"
           onClick={() => {
@@ -145,6 +149,7 @@ export default function Home() {
         >
           Sign out
         </button>
+        </div>
       </header>
 
       {loadError ? (

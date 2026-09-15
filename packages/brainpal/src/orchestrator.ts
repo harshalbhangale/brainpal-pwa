@@ -15,6 +15,8 @@ export interface TurnInput {
   speakerRole: FamilyRole;
   /** PAL ids this family has activated. An inactive PAL cannot own a request. */
   activePals: ReadonlySet<string>;
+  /** Ledger facts scoped to the speaker, built by the caller. Only MoneyPAL is shown them. */
+  moneyFacts?: string;
 }
 
 export type TurnEvent =
@@ -86,6 +88,14 @@ export async function* runTurn(
   try {
     const stream = await agent.stream([
       { role: "system", content: context },
+      ...(routing.ownerPal === "moneypal" && input.moneyFacts
+        ? [
+            {
+              role: "system" as const,
+              content: `Ledger facts for this family, read just now. These are the only family numbers you may state:\n${input.moneyFacts}`,
+            },
+          ]
+        : []),
       { role: "user", content: input.text },
     ]);
 

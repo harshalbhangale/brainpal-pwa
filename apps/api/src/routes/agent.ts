@@ -11,6 +11,7 @@ import {
   threadEvents,
   threads,
 } from "@brainpal/database";
+import { ledgerFacts } from "@brainpal/moneypal";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 
@@ -122,12 +123,23 @@ export async function registerAgentRoutes(app: FastifyInstance) {
 
     const activePals = await activePalsFor(principal.familyId);
 
+    // Best-effort: a ledger read failing must not stop MoneyPAL answering. It
+    // then has no facts, and its instructions say to admit that rather than guess.
+    const moneyFacts = activePals.has("moneypal")
+      ? await ledgerFacts(db, {
+          memberId: principal.memberId,
+          familyId: principal.familyId,
+          role: principal.role,
+        }).catch(() => undefined)
+      : undefined;
+
     try {
       for await (const event of runTurn({
         text,
         speakerName: principal.displayName,
         speakerRole: principal.role,
         activePals,
+        ...(moneyFacts ? { moneyFacts } : {}),
       })) {
         if (event.type === "routed" && !threadId) {
           // The thread is created once the owning PAL is known, so it is never
