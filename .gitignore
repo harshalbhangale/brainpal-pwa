@@ -33,3 +33,4 @@ pnpm-debug.log*
 
 # Per-developer tool permissions. .claude/launch.json is shared.
 .claude/settings.local.json
+.vercel
