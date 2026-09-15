@@ -234,7 +234,7 @@ Resources:
   Repository:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: brainpal-api
+      RepositoryName: brainpal/api
       ImageTagMutability: IMMUTABLE
       ImageScanningConfiguration: { ScanOnPush: true }
       LifecyclePolicy:
@@ -383,7 +383,7 @@ Resources:
             - { Name: DB_HOST, Value: !GetAtt Database.Endpoint.Address }
             - { Name: DB_PORT, Value: !GetAtt Database.Endpoint.Port }
             - { Name: DB_NAME, Value: brainpal }
-            - { Name: DATABASE_SSL_CA, Value: /etc/ssl/rds-global-bundle.pem }
+            - { Name: DATABASE_SSL_CA, Value: /opt/rds/global-bundle.pem }
             - { Name: ALLOWED_ORIGINS, Value: !Ref AllowedOrigin }
             - { Name: EMAIL_PROVIDER, Value: ses }
             - { Name: EMAIL_FROM, Value: !Ref EmailFrom }
@@ -429,7 +429,7 @@ Resources:
             - { Name: DB_HOST, Value: !GetAtt Database.Endpoint.Address }
             - { Name: DB_PORT, Value: !GetAtt Database.Endpoint.Port }
             - { Name: DB_NAME, Value: brainpal }
-            - { Name: DATABASE_SSL_CA, Value: /etc/ssl/rds-global-bundle.pem }
+            - { Name: DATABASE_SSL_CA, Value: /opt/rds/global-bundle.pem }
             - { Name: WORKER_INTERVAL_MS, Value: "60000" }
           Secrets:
             - Name: DB_USER
@@ -464,7 +464,7 @@ Resources:
             - { Name: DB_HOST, Value: !GetAtt Database.Endpoint.Address }
             - { Name: DB_PORT, Value: !GetAtt Database.Endpoint.Port }
             - { Name: DB_NAME, Value: brainpal }
-            - { Name: DATABASE_SSL_CA, Value: /etc/ssl/rds-global-bundle.pem }
+            - { Name: DATABASE_SSL_CA, Value: /opt/rds/global-bundle.pem }
           Secrets:
             - Name: DB_USER
               ValueFrom: !Join ["", [!GetAtt Database.MasterUserSecret.SecretArn, ":username::"]]

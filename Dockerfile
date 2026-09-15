@@ -17,7 +17,10 @@ FROM node:24-bookworm-slim
 WORKDIR /repo
 ENV NODE_ENV=production
 # RDS requires TLS; the pool verifies against this bundle via DATABASE_SSL_CA.
-ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/rds-global-bundle.pem
+# Not under /etc/ssl: the slim image has no such directory, and letting ADD
+# create it leaves it unreadable, which stops Node loading its OpenSSL config.
+ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/rds/global-bundle.pem
+RUN chmod 755 /opt/rds
 COPY --from=build --chown=node:node /repo /repo
 USER node
 EXPOSE 3001
